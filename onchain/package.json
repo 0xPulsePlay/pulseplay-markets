@@ -1,0 +1,17 @@
+{
+  "name": "@pulseplay/onchain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "pulseplay_escrow Anchor program + txoracle-cpi crate: trustless settlement on TxLINE via CPI.",
+  "scripts": {
+    "test": "tsx tests/pulseplay-escrow.ts"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.4",
+    "bn.js": "^5.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

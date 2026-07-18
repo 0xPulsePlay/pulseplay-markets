@@ -1,0 +1,21 @@
+node_modules/
+.next/
+dist/
+build/
+out/
+.turbo/
+coverage/
+*.log
+.DS_Store
+.env
+.env.local
+
+# Rust / Anchor
+onchain/target/
+onchain/.anchor/
+onchain/test-ledger/
+**/*.rs.bk
+
+# keeper runtime state
+apps/keeper/.data/
+receipts/

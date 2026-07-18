@@ -1,0 +1,17 @@
+{
+  "name": "pulseplay-markets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PulsePlay Markets — three market categories settled trustlessly on TxLINE-anchored data.",
+  "type": "module",
+  "scripts": {
+    "dev:web": "pnpm --filter @pulseplay/web dev",
+    "dev:keeper": "pnpm --filter @pulseplay/keeper dev",
+    "build:pricing": "pnpm --filter @pulseplay/pricing build",
+    "test:pricing": "pnpm --filter @pulseplay/pricing test",
+    "test": "pnpm --filter @pulseplay/pricing test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

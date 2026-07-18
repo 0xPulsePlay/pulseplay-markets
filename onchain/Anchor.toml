@@ -1,0 +1,26 @@
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+pulseplay_escrow = "2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+# We run our own local validator that clones the real TxLINE oracle program + the anchored
+# daily_scores_roots PDA (see README / scripts), so tests point at it rather than a bare validator.
+[test.validator]
+url = "https://api.mainnet-beta.solana.com"
+
+[[test.validator.clone_upgradeable_program]]
+address = "9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA"
+
+[[test.validator.clone]]
+address = "6d9bJ2EtjAFj2k3CKbe2VV8qZ5BgdBnGsYjWApxHWgtE"
+
+[scripts]
+test = "pnpm exec tsx tests/pulseplay-escrow.ts"

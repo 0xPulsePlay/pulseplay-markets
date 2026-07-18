@@ -1,0 +1,12 @@
+[package]
+name = "txoracle-cpi"
+version = "0.1.0"
+description = "Program-side CPI helper for the TxLINE oracle's validate_stat instructions — build the instruction, derive the PDA, read the predicate result. Lets any Anchor program settle on TxLINE-verified sports data."
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+anchor-lang = "1.1.2"
