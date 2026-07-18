@@ -3,7 +3,9 @@
 Compaction-proof memory + orchestrator window. Acceptance criteria authored up front; never weakened.
 PASS = watched it work. PENDING = not yet. BLOCKED = see `BLOCKED.md`.
 
-_Last updated: 2026-07-18 (Phase 2 GREEN on localnet — 10/10 settlement checks pass)_
+_Last updated: 2026-07-18 — **ALL 5 PHASES GREEN.** Escrow 10/10 · pricing 15/15 · e2e 0 errors.
+Only devnet deploy (P2.8) is parked (faucet dry — see BLOCKED.md); localnet is the proof of record.
+Every cut-line item landed, including the V3 batch stretch._
 
 ## The product in one line
 One platform, three market categories, all settled trustlessly on TxLINE-anchored data:
@@ -32,7 +34,7 @@ card") settle the NO side cryptographically.
 - [x] P2.5 V3 multi-leg batch settles 4 legs in ONE CPI  **PASS**
 - [x] P2.6 derived binary market (corner difference) settles in one CPI  **PASS**
 - [x] P2.7 cancel/timeout + refund path tested (both sides made whole)  **PASS**
-- [ ] P2.8 deploy to devnet if wallet funded; else localnet-only + BLOCKED entry  PENDING
+- [~] P2.8 deploy to devnet — **BLOCKED** (faucet dry, wallet 0 SOL); localnet-only is the proof of record per engine brief. See BLOCKED.md §1.
 
 _Evidence: `ANCHOR_PROVIDER_URL=http://127.0.0.1:8999 npx tsx tests/pulseplay-escrow.ts` → "ALL
 PULSEPLAY ESCROW TESTS PASSED (10 checks)". Validator clones real oracle 9Exb… + PDA 6d9bJ2Et…._
