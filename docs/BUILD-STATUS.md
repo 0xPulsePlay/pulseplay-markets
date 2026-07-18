@@ -68,6 +68,20 @@ on-chain root". 0 console/page errors. Screenshots 01–09 in docs/screenshots/.
 
 ---
 
+## Round-2 fixes (post independent-verification)
+- [x] **V2 landed coherently** — Combos settle via a real `validate_stat_v2` CPI; program+keeper+catalog
+  shipped together (running product matches the docs). Escrow suite re-confirmed **12/12**.  **PASS**
+- [x] **Proof-receipt honesty** — never fabricate a green "EQUALS". Absent a real engine verdict (both
+  roots), the receipt shows an **unverified/unavailable** state (warning), and a genuine mismatch shows
+  red "would be rejected". Happy path still shows the real match.  **PASS**
+- [x] **Mobile topbar overflow @390px** — no horizontal scroll (verified scrollWidth==clientWidth==390);
+  badges wrap to their own row, TXLINE-settled hidden on mobile (reality labels kept).  **PASS**
+- [x] **Removed topbar backdrop blur** (GUIDE §5 bans glass/blur) — `backdrop-filter: none` verified.  **PASS**
+- [x] **Hero scoreline wraps cleanly** on narrow mobile; added `body { overflow-x: hidden }` safety.  **PASS**
+
+_Evidence: mobile.mjs (390px, 0 errors, no overflow, blur none) + desktop journey (0 errors, receipt
+green match preserved). Screenshots 10-mobile-storefront, 11-mobile-replay added._
+
 ## Cut-line (protect in this order if time compresses)
 1. V1+V2 escrow settling e2e on localnet with tests  ← highest
 2. Storefront with proof receipt on the replay

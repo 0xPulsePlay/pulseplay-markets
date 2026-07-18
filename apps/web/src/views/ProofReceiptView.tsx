@@ -69,22 +69,29 @@ export function ProofReceiptView({ catalog, settlements, activeReceipt, setActiv
                 </div>
               </React.Fragment>
             ))}
-            <div className="step ok">
-              <span className="num"><IconCheck size={14} /></span>
-              <div>
-                <div className="st">{c.onChain.title}</div>
-                <div className="plain">{c.onChain.plain}</div>
-                <div className="match-banner" style={{ marginTop: 8 }}>
-                  <IconShield size={18} className="tick" />
+            {(() => {
+              const unavailable = !c.onChain.match && String(c.onChain.computedRootHex).startsWith("(");
+              const bannerColor = c.onChain.match ? "var(--pp-color-verified)" : unavailable ? "var(--pp-color-warning)" : "var(--pp-color-no)";
+              const bannerText = c.onChain.match ? "Reconstructed root equals the on-chain root" : unavailable ? "On-chain verification unavailable — not asserting a match" : "Root mismatch — this proof would be rejected";
+              return (
+                <div className={`step ${c.onChain.match ? "ok" : ""}`}>
+                  <span className="num" style={c.onChain.match ? undefined : { color: bannerColor, borderColor: bannerColor }}>
+                    {c.onChain.match ? <IconCheck size={14} /> : "4"}
+                  </span>
                   <div>
-                    <div style={{ fontWeight: 600, color: c.onChain.match ? "var(--pp-color-verified)" : "var(--pp-color-no)" }}>
-                      {c.onChain.match ? "Reconstructed root equals the on-chain root" : "Root mismatch"}
+                    <div className="st">{c.onChain.title}</div>
+                    <div className="plain">{c.onChain.plain}</div>
+                    <div className="match-banner" style={{ marginTop: 8, borderColor: `color-mix(in srgb, ${bannerColor} 45%, var(--pp-color-border))` }}>
+                      <IconShield size={18} style={{ color: bannerColor }} />
+                      <div>
+                        <div style={{ fontWeight: 600, color: bannerColor }}>{bannerText}</div>
+                        <div className="tiny mono" style={{ marginTop: 4 }}>PDA {c.onChain.pda}</div>
+                      </div>
                     </div>
-                    <div className="tiny mono" style={{ marginTop: 4 }}>PDA {c.onChain.pda}</div>
                   </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         </div>
       </div>

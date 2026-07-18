@@ -218,11 +218,23 @@ export async function buildReceipt(m: Market): Promise<ProofReceipt> {
   const desc = describeStatKey(triple.key);
 
   const v = await engineValidation(m.statKey).catch(() => null);
-  const oc = v?.onChain ?? {};
-  const computed = oc.computedRootHex ? "0x" + oc.computedRootHex.replace(/^0x/, "") : hex(proof.eventStatRoot);
-  const onChainRoot = oc.onChainRootHex ? "0x" + oc.onChainRootHex.replace(/^0x/, "") : computed;
-  const epochDay = oc.epochDay ?? 20649;
+  const oc = v?.onChain ?? null;
+  const norm = (h: string) => "0x" + h.replace(/^0x/, "");
+  // A verdict is only real when the engine returned BOTH roots. Never fabricate equality — on a trust
+  // product a spurious green check is the worst bug class, so absent a verdict we show "unverified".
+  const computed: string | null = oc?.computedRootHex ? norm(oc.computedRootHex) : null;
+  const onChainRoot: string | null = oc?.onChainRootHex ? norm(oc.onChainRootHex) : null;
+  const haveVerdict = !!(computed && onChainRoot);
+  const match = haveVerdict && computed === onChainRoot;
+  const verified = haveVerdict && (oc?.verified ?? oc?.subTreeVerified ?? false) === true && match;
+  const epochDay = oc?.epochDay ?? 20649;
   const settlement = store.get(m.id);
+
+  const onChainPlain = !haveVerdict
+    ? `On-chain verification is currently unavailable (the engine's read-only verify call did not return a verdict). We are NOT asserting a match — re-open once the engine is reachable to confirm the reconstructed root against the anchored PDA.`
+    : match
+      ? `TxLINE anchored that exact daily root on Solana in the daily_scores_roots PDA. Your reconstructed root ${computed!.slice(0, 10)}… EQUALS the on-chain root ${onChainRoot!.slice(0, 10)}… — so the result is exactly what Solana recorded. No committee, no vote: the proof is the resolution.`
+      : `The reconstructed root ${computed!.slice(0, 10)}… does NOT equal the on-chain root ${onChainRoot!.slice(0, 10)}… — this proof would be rejected. Settlement never proceeds on a mismatch.`;
 
   return {
     marketId: m.id,
@@ -231,7 +243,7 @@ export async function buildReceipt(m: Market): Promise<ProofReceipt> {
     statTriple: triple,
     predicate: m.predicateLabel,
     outcome: settlement ? settlement.outcome : null,
-    verified: oc.verified ?? oc.subTreeVerified ?? true,
+    verified,
     chain: {
       leaf: {
         title: "1 · The stat leaf",
@@ -245,17 +257,19 @@ export async function buildReceipt(m: Market): Promise<ProofReceipt> {
       },
       dailyRoot: {
         title: "3 · The day's anchored root",
-        plain: `That subtree folds into the root of every stat TxLINE recorded on epoch day ${epochDay}. We reconstruct this root from your proof, client-side.`,
-        hashHex: computed,
+        plain: haveVerdict
+          ? `That subtree folds into the root of every stat TxLINE recorded on epoch day ${epochDay}. This root is reconstructed from your proof, client-side.`
+          : `That subtree folds into the day's root of every stat TxLINE recorded (epoch day ${epochDay}). The reconstructed value is unavailable until the engine verify call succeeds.`,
+        hashHex: computed ?? "(unavailable — engine verify offline)",
         epochDay,
       },
       onChain: {
         title: "4 · The on-chain match",
-        plain: `TxLINE anchored that exact daily root on Solana in the daily_scores_roots PDA. Your reconstructed root ${computed.slice(0, 10)}… ${onChainRoot === computed ? "EQUALS" : "vs"} the on-chain root ${onChainRoot.slice(0, 10)}… — so the result is exactly what Solana recorded. No committee, no vote: the proof is the resolution.`,
-        pda: oc.pda ?? CONFIG.dailyScoresRootsPda,
-        onChainRootHex: onChainRoot,
-        computedRootHex: computed,
-        match: onChainRoot === computed,
+        plain: onChainPlain,
+        pda: oc?.pda ?? CONFIG.dailyScoresRootsPda,
+        onChainRootHex: onChainRoot ?? "(unavailable)",
+        computedRootHex: computed ?? "(unavailable)",
+        match,
       },
     },
     settleTx: settlement?.txids.resolve ?? null,
