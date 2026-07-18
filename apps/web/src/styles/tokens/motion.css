@@ -1,0 +1,5 @@
+/* PulsePlay motion tokens. Fast because the data is live, not because the UI is. */
+:root {
+  --pp-motion-feedback: 160ms;
+  --pp-motion-ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+}

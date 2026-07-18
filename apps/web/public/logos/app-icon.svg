@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc"><title id="title">Ultraviolet Rolling Signal app icon</title><desc id="desc">PulsePlay Ultraviolet Rolling Signal app icon</desc><style>
+  .display{font-family:'DIN Alternate','Helvetica Neue',sans-serif;font-weight:700;letter-spacing:-.018em}
+  .body{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:400;letter-spacing:0}
+  .medium{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:600;letter-spacing:-.005em}
+  .data{font-family:Menlo,monospace;font-weight:600;letter-spacing:.025em;font-variant-numeric:tabular-nums}
+</style><rect width="512" height="512" rx="104" fill="#101217"/><rect x="18" y="18" width="476" height="476" rx="86" fill="none" stroke="#2A2E38" stroke-width="8"/><g transform="translate(86 86) scale(3.4)"><path d="M12 18h42v15H28v34h26v15H12z" fill="#F4F5F7"/><path d="M46 18h42v64H46V67h26V33H46z" fill="#905BFF"/><rect x="42" y="43" width="16" height="14" fill="#F4F5F7"/></g><path d="M58 454h396" stroke="#2A2E38" stroke-width="9" stroke-linecap="round"/><path d="M58 454h128" stroke="#905BFF" stroke-width="9" stroke-linecap="round"/></svg>

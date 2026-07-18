@@ -1,0 +1,32 @@
+/* PulsePlay typography tokens.
+   Track DIN is the canonical display/wordmark face but its binaries are not
+   distributed with the brand kit (license held separately by PulsePlay).
+   Oswald (Google Fonts) is substituted here as the nearest condensed-grotesk
+   match to DIN Alternate, the brand kit's own documented fallback direction —
+   FLAG this substitution and swap in licensed Track DIN files when available. */
+@import url("https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap");
+
+:root {
+  --pp-font-display: "Oswald", "DIN Alternate", "Arial Narrow", sans-serif;
+  --pp-font-body: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --pp-font-data: Menlo, Consolas, "SFMono-Regular", ui-monospace, monospace;
+
+  --pp-font-weight-regular: 400;
+  --pp-font-weight-medium: 600;
+  --pp-font-weight-bold: 700;
+
+  /* Type scale — derived from usage observed across product references */
+  --pp-text-2xs: 11px;
+  --pp-text-xs: 12px;
+  --pp-text-sm: 14px;
+  --pp-text-base: 16px;
+  --pp-text-md: 18px;
+  --pp-text-lg: 22px;
+  --pp-text-xl: 28px;
+  --pp-text-2xl: 36px;
+  --pp-text-3xl: 48px;
+
+  --pp-tracking-display: -0.018em;
+  --pp-tracking-medium: -0.005em;
+  --pp-tracking-data: 0.025em;
+}

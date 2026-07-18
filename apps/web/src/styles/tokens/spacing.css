@@ -1,0 +1,21 @@
+/* PulsePlay spacing, radius, and sizing tokens. */
+:root {
+  --pp-space-1: 4px;
+  --pp-space-2: 8px;
+  --pp-space-3: 12px;
+  --pp-space-4: 16px;
+  --pp-space-5: 20px;
+  --pp-space-6: 24px;
+  --pp-space-8: 32px;
+  --pp-space-10: 40px;
+  --pp-space-12: 48px;
+  --pp-space-16: 64px;
+
+  /* Logo geometry stays sharp; product surfaces are the only rounded things. */
+  --pp-radius-control: 7px;
+  --pp-radius-card: 10px;
+  --pp-radius-panel: 12px;
+
+  --pp-target-min: 44px;
+  --pp-logo-badge-min: 24px;
+}

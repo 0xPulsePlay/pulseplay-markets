@@ -1,0 +1,91 @@
+/* PulsePlay — Ultraviolet Rolling Signal — color tokens
+   Source of truth: brand/design-tokens/pulseplay.tokens.json (canonical v1.0.0).
+   Dark is the default product theme; light is opt-in via [data-pulseplay-theme="light"]. */
+
+:root,
+[data-pulseplay-theme="dark"] {
+  color-scheme: dark;
+
+  /* Brand */
+  --pp-color-brand: #905bff;
+  --pp-color-brand-deep: #5a2bc4;
+  --pp-color-brand-bright: #b69aff;
+  --pp-color-brand-soft: #241b38;
+  --pp-color-on-brand: #080a0e;
+
+  /* Shell */
+  --pp-color-background: #080a0e;
+  --pp-color-surface: #101217;
+  --pp-color-surface-raised: #171a21;
+  --pp-color-surface-raised-secondary: #1d2028;
+  --pp-color-text: #f4f5f7;
+  --pp-color-text-muted: #a2a8b3;
+  --pp-color-text-faint: #7c8491;
+  --pp-color-border: #2a2e38;
+  --pp-color-border-strong: #3a3f4b;
+
+  /* Semantic */
+  --pp-color-yes: #35d49d;
+  --pp-color-no: #ff5b74;
+  --pp-color-live: #ff7657;
+  --pp-color-warning: #ffac32;
+  --pp-color-verified: #2fc7d1;
+
+  /* Field / pitch diagram */
+  --pp-color-pitch: #12342d;
+  --pp-color-pitch-raised: #174239;
+  --pp-color-pitch-line: #86aaa0;
+
+  --pp-color-focus: var(--pp-color-brand);
+  --pp-color-primary-action: var(--pp-color-brand-deep);
+  --pp-color-on-primary-action: #f4f5f7;
+}
+
+[data-pulseplay-theme="light"] {
+  color-scheme: light;
+
+  --pp-color-brand: #905bff;
+  --pp-color-brand-deep: #5a2bc4;
+  --pp-color-brand-bright: #7440e5;
+  --pp-color-brand-soft: #eee8ff;
+  --pp-color-on-brand: #080a0e;
+
+  --pp-color-background: #f4f5f7;
+  --pp-color-surface: #ffffff;
+  --pp-color-surface-raised: #eaecef;
+  --pp-color-surface-raised-secondary: #e1e4e9;
+  --pp-color-text: #14161b;
+  --pp-color-text-muted: #5d6470;
+  --pp-color-text-faint: #69717d;
+  --pp-color-border: #d7dae0;
+  --pp-color-border-strong: #b9bfc9;
+
+  --pp-color-yes: #137b59;
+  --pp-color-no: #b73950;
+  --pp-color-live: #b94b34;
+  --pp-color-warning: #8c5900;
+  --pp-color-verified: #147a84;
+
+  --pp-color-pitch: #173d35;
+  --pp-color-pitch-raised: #1c493f;
+  --pp-color-pitch-line: #a9c2b9;
+
+  --pp-color-focus: var(--pp-color-brand-deep);
+  --pp-color-primary-action: var(--pp-color-brand-deep);
+  --pp-color-on-primary-action: #f4f5f7;
+}
+
+/* Graph spectrum — assign by stable series identity, never decoratively. */
+:root {
+  --pp-graph-ultraviolet: #905bff;
+  --pp-graph-blue: #4a86f7;
+  --pp-graph-green: #35d49d;
+  --pp-graph-red: #ff5b74;
+  --pp-graph-amber: #ffac32;
+  --pp-graph-cyan: #2fc7d1;
+
+  /* Light-mode graph line values (darker, for contrast on white cards) */
+  --pp-graph-blue-light: #2e65c8;
+  --pp-graph-amber-light: #8c5900;
+  --pp-graph-cyan-light: #147a84;
+}

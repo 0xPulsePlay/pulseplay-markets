@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc"><title id="title">Ultraviolet Rolling Signal color badge</title><desc id="desc">PulsePlay Ultraviolet Rolling Signal color badge</desc><style>
+  .display{font-family:'DIN Alternate','Helvetica Neue',sans-serif;font-weight:700;letter-spacing:-.018em}
+  .body{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:400;letter-spacing:0}
+  .medium{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:600;letter-spacing:-.005em}
+  .data{font-family:Menlo,monospace;font-weight:600;letter-spacing:.025em;font-variant-numeric:tabular-nums}
+</style><g transform="translate(56 56) scale(4)"><path d="M12 18h42v15H28v34h26v15H12z" fill="#14161B"/><path d="M46 18h42v64H46V67h26V33H46z" fill="#905BFF"/><rect x="42" y="43" width="16" height="14" fill="#14161B"/></g></svg>
