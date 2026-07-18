@@ -18,8 +18,8 @@ export function MarketCard({ market, selectedSide, onPick }: {
           <div className="market-title">{market.title}</div>
           <div className="market-sub">{market.subtitle}</div>
         </div>
-        <span className="gen-chip" title={market.generation === "V1" ? "validate_stat (single stat)" : "validate_stat_v3 (multiproof)"}>
-          {market.generation === "V3" ? <IconLayers size={11} /> : <IconTarget size={11} />} {market.generation}
+        <span className="gen-chip" title={market.generation === "V1" ? "validate_stat — single stat, one PDA" : market.generation === "V2" ? "validate_stat_v2 — indexed multi-leg, one CPI" : "validate_stat_v3 — shared multiproof"}>
+          {market.generation === "V1" ? <IconTarget size={11} /> : <IconLayers size={11} />} {market.generation}
         </span>
       </div>
 

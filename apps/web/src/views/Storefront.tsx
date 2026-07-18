@@ -8,7 +8,7 @@ import { IconReplay, IconBolt } from "../components/icons";
 
 const CATS: { key: Market["category"]; label: string; blurb: string }[] = [
   { key: "outcomes", label: "Outcomes", blurb: "Single-claim markets · V1 validate_stat" },
-  { key: "combos", label: "Combos", blurb: "Same-match multi-leg · V3 multiproof, one CPI" },
+  { key: "combos", label: "Combos", blurb: "Same-match multi-leg · V2 indexed strategy, one CPI" },
   { key: "batch", label: "Batch", blurb: "Mega-tickets & derived markets · V3 multiproof" },
 ];
 

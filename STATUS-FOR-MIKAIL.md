@@ -3,9 +3,11 @@
 _Overnight build, 2026-07-18. Track 1 (Prediction Markets & Settlement). Repo:
 `/Users/mikail/Desktop/PulsePlay/pulseplay-markets` — local git, never pushed._
 
-**One platform, three market categories, every one settled trustlessly on TxLINE-anchored data.**
-Outcomes settle by **V1 `validate_stat`**, Combos by **V3 multiproof** (one CPI covers a same-match
-ticket), Batch/derived by **V3 multiproof**. The proof IS the resolution — no committee, no dispute
+**One platform, three market categories, every one settled trustlessly on TxLINE-anchored data — and
+deliberately all THREE generations of the TxLINE validation instruction.** Outcomes settle by **V1
+`validate_stat`**, Combos by **V2 `validate_stat_v2`** (indexed strategy — every requested stat covered
+exactly once, one CPI settles the same-match ticket), Batch/derived by **V3 multiproof**. The proof IS
+the resolution — no committee, no dispute
 window. The storefront prices everything off TxLINE's **de-margined `Pct`** (fair price is free data) and
 walks the Merkle chain (leaf → subtree → daily root → on-chain PDA) in plain language for judges new to
 Solana. All five build phases are green.
@@ -14,12 +16,13 @@ Solana. All five build phases are green.
 
 ## Verified end-to-end (things I actually watched work)
 
-- **On-chain settlement suite — 10/10 checks** against a local validator that clones the REAL TxLINE
-  oracle (`9ExbZj…`) + anchored PDA (`6d9bJ2Et…`):
-  YES payout + claim · **sentinel-zero "no red card" NO-side settled cryptographically** (value 0 is a
-  provable absence) · tampered-V1 proof **reverts** (fail-closed) · **4-leg V3 combo in ONE CPI** ·
-  **derived binary corner-difference in one CPI** · tampered-V3 reverts · **cancel/timeout + refund**.
-  → `ANCHOR_PROVIDER_URL=http://127.0.0.1:8999 npx tsx tests/pulseplay-escrow.ts` → "ALL PULSEPLAY ESCROW TESTS PASSED (10 checks)".
+- **On-chain settlement suite — 12/12 checks** against a local validator that clones the REAL TxLINE
+  oracle (`9ExbZj…`) + anchored PDA (`6d9bJ2Et…`), exercising **all three generations**:
+  V1 YES payout + claim · **sentinel-zero "no red card" NO-side settled cryptographically** (value 0 is a
+  provable absence) · tampered-V1 proof **reverts** (fail-closed) · **V2 `validate_stat_v2` 3-leg combo in
+  ONE CPI** + tamper-revert · **4-leg V3 combo in ONE CPI** · **derived binary corner-difference in one
+  CPI** · tampered-V3 reverts · **cancel/timeout + refund**.
+  → `ANCHOR_PROVIDER_URL=http://127.0.0.1:8999 npx tsx tests/pulseplay-escrow.ts` → "ALL PULSEPLAY ESCROW TESTS PASSED (12 checks)".
 - **Pricing package — 15/15 unit tests.** De-margined probabilities, LMSR seeded at the fair prior
   (b=300; worst-case loss b·ln n = $208 binary / $330 1X2, matching the spec), parlay fair-vs-book
   (3 legs @6% → 84.0% of fair; full spec table reproduced), Gaussian-copula correlation.
@@ -48,9 +51,10 @@ Solana. All five build phases are green.
   local-validator suite against the real cloned oracle is the settlement proof of record (as the engine
   brief intends). A live devnet *resolve* is separately gated on a devnet API token (403), a documented
   fast-follow.
-- **V2 is expressed via V3.** The vendored CPI crate ships V1 + V3 helpers only; Combos use V3
-  full-coverage (one CPI, every stat covered exactly once) which delivers the V2 "indexed ticket"
-  semantics. Honest note in `BLOCKED.md` §2. Not a literal `validate_stat_v2` CPI.
+- **V2 is a real `validate_stat_v2` CPI now.** The vendored crate shipped V1 + V3 helpers only, so
+  `cpi_validate_stat_v2` is a thin local adapter (V2 = V3 minus the multiproof; wire format locked against
+  the golden fixture). One residual: Anchor's JS coder has a fixed 1000-byte instruction buffer, so the V2
+  combo is capped at ~3 legs (a client-SDK limit, not the program). Detail in `BLOCKED.md` §2.
 - **Combo/derived outcome bool.** For >1-leg V3 markets the settlement bool is the multiproof's combined
   verdict; the WIN is that all legs verify atomically in one CPI. Single-leg V1 is the path for a fully
   controllable GT/LT/EQ predicate (same caveat the reference escrow-demo documents).
@@ -110,7 +114,8 @@ Program id `2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin` · Oracle `9ExbZjAapQw
    margin tax (visible on every card; the 3-leg combo pays **48.1× fair vs 38.1× book**).
 2. **Hit "Watch the replay settle."** Fast-forward at 12× — clock and score stay in sync, the
    win-probability lines cross as Argentina come back. At full time, **"Settle full-time markets"** —
-   the keeper fetches TxLINE proofs and settles V1, V3 combo, and V3 derived in one CPI each, on-chain.
+   the keeper fetches TxLINE proofs and settles all three generations — V1 (Outcomes), V2 (the combo),
+   V3 (the batch) — one CPI each, on-chain. Showing all three is the beat no other team will have.
 3. **Open a proof receipt.** Walk the four steps: the stat leaf → the fixture's event-stats subtree →
    the day's anchored root (epoch day 20649) → the on-chain PDA, where **the reconstructed root equals
    the root Solana already stored.** No committee, no vote — the proof is the resolution.

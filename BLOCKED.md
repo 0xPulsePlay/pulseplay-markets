@@ -22,18 +22,23 @@ devnet scores stat-validation returns `403 "Missing API token"` (engine brief §
 odds/fixtures but not scores proofs on devnet. This is why the reference escrow-demo also stopped at a
 devnet `create_market` smoke and kept the local-validator suite as the record.
 
-## 2. V2 helper gap — `validate_stat_v2` not shipped by the vendored crate/SDK
-**State:** the `txoracle-cpi` Rust crate exposes `cpi_validate_stat` (V1) and `cpi_validate_stat_v3` (V3)
-only — there is **no `cpi_validate_stat_v2`**. `@txline/verify` similarly ships V1 + V3 instruction
-builders (it exports a `VALIDATE_STAT_V2_DISCRIMINATOR` constant but no full V2 builder/verifier).
-**Decision (not a stall):** the three product categories map cleanly onto the two shipped generations —
-Outcomes → **V1**, Combos → **V3 full-coverage** (one CPI covers every requested stat exactly once, which
-is precisely the "indexed multi-leg, one ticket, one CPI" semantics V2 was meant to provide), Batch → **V3
-multiproof / derived binary**. The multiproof (V3) subsumes V2. Both settle correctly and fail-closed in
-the local-validator suite (10/10).
-**To add a literal V2 CPI later:** mirror the V2 Borsh layout in a thin local helper in this repo (do NOT
-edit the vendored crate) using discriminator `[208,215,194,214,241,71,246,178]`; deferred because it
-duplicates coverage V3 already proves and carries reverse-engineering risk without a recorded V2 fixture.
+## 2. V2 (`validate_stat_v2`) — RESOLVED (was: no crate helper)
+**Was blocked:** the vendored `txoracle-cpi` Rust crate ships `cpi_validate_stat` (V1) +
+`cpi_validate_stat_v3` (V3) only — no `cpi_validate_stat_v2`.
+**Resolved:** implemented `cpi_validate_stat_v2` as a thin **local adapter** in the program (contract-
+permitted — the vendored crate is untouched). The SDK's own docstring pins it: **"V3 == V2 + a
+`multiproof` field after `statsToProve`"**, so V2 is V3 minus the multiproof, with discriminator
+`d0d7c2d6f147f6b2`. Wire format cross-checked against the recorded `validate-stat-v2v3` golden fixture
+(offsets: ts · summary · subTreeProof · mainTreeProof · eventStatRoot · statsToProve · trailer). Combos
+now settle via a real `resolve_combo` → `validate_stat_v2` indexed strategy; the V2 payload comes from the
+**LIVE `/v1` multi-stat proof** (each leg carries its own membership path). Verified on-chain: escrow
+suite P2.5b (settle + tamper-revert) and keeper `/api/settle/combo-final-scoreline` (generation V2, root
+match). So the demo shows **all three generations — V1, V2, V3 — in three transactions.**
+**Residual (minor):** Anchor's JS instruction coder allocates a fixed **1000-byte** buffer
+(`@coral-xyz/anchor@0.31.1`), so a V2 combo with full per-leg membership paths is capped at ~3 legs
+(~924 bytes; a 4th leg overflows at ~1084). This is a client-SDK limit, not the program or oracle — the
+program accepts any number of legs. A 3-leg same-match ticket is the demo combo. To lift the cap, build
+the instruction data outside Anchor's coder (e.g. via `@txline/verify` encoders) and send a raw tx.
 
 ## 3. Local validator is memory-sensitive under parallel builds (operational note)
 The `solana-test-validator` that clones the mainnet oracle + PDA was OOM-reaped once while five hackathon

@@ -16,6 +16,8 @@
 //! Escrow is in native SOL (stand-in for USDC on devnet). SAFETY: local validator + devnet only.
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::program::{get_return_data, invoke};
 use anchor_lang::system_program::{transfer, Transfer};
 use txoracle_cpi::{
     cpi_validate_stat, cpi_validate_stat_v3, strategy_trailer, BinaryExpression, Comparison,
@@ -36,6 +38,48 @@ pub const ORACLE_PROGRAM: Pubkey = TXORACLE_DEVNET;
 pub const KIND_OUTCOME: u8 = 0;
 pub const KIND_COMBO: u8 = 1;
 pub const KIND_BATCH: u8 = 2;
+
+/// `validate_stat_v2` — the INDEXED multi-leg instruction. Structurally it is `validate_stat_v3` MINUS
+/// the shared `multiproof`: each proven stat carries its OWN membership path, and a `Strategy` trailer
+/// covers every stat exactly once. ONE CPI settles a same-match combo ticket atomically. The vendored
+/// `txoracle-cpi` crate ships V1 + V3 helpers only, so this is a thin LOCAL adapter (contract-permitted).
+/// Wire format locked against the recorded `validate-stat-v2v3` golden fixture (disc d0d7c2d6f147f6b2,
+/// offsets: ts · summary · subTreeProof · mainTreeProof · eventStatRoot · statsToProve · trailer).
+pub const VALIDATE_STAT_V2_DISCRIMINATOR: [u8; 8] = [208, 215, 194, 214, 241, 71, 246, 178];
+
+/// `validate_stat_v2` args = `validate_stat_v3` args without the `multiproof` field.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct ValidateStatV2Args {
+    pub ts: i64,
+    pub summary: FixtureSummary,
+    pub sub_tree_proof: Vec<ProofNode>,
+    pub main_tree_proof: Vec<ProofNode>,
+    pub event_stat_root: [u8; 32],
+    pub stats_to_prove: Vec<StatEntry>,
+}
+
+/// CPI `validate_stat_v2` (discriminator + Borsh args + raw `Strategy` trailer) and read the predicate
+/// return-data bool. Same fail-closed guarantee as V1/V3: a tampered proof reverts the CPI.
+fn cpi_validate_stat_v2<'info>(
+    oracle_program: &AccountInfo<'info>,
+    daily_scores_roots: &AccountInfo<'info>,
+    args: &ValidateStatV2Args,
+    trailer: &[u8],
+) -> Result<bool> {
+    let mut data = VALIDATE_STAT_V2_DISCRIMINATOR.to_vec();
+    args.serialize(&mut data).expect("borsh serialize validate_stat_v2 args");
+    data.extend_from_slice(trailer);
+    let ix = Instruction {
+        program_id: *oracle_program.key,
+        accounts: vec![AccountMeta::new_readonly(*daily_scores_roots.key, false)],
+        data,
+    };
+    invoke(&ix, &[daily_scores_roots.clone(), oracle_program.clone()])?;
+    match get_return_data() {
+        Some((pid, d)) if pid == *oracle_program.key => Ok(d.first().copied().unwrap_or(0) == 1),
+        _ => Ok(false),
+    }
+}
 
 #[program]
 pub mod pulseplay_escrow {
@@ -208,6 +252,44 @@ pub mod pulseplay_escrow {
             &ctx.accounts.txoracle_program,
             &ctx.accounts.daily_scores_roots,
             &v3,
+            &trailer,
+        )?;
+        m.outcome = predicate_holds;
+        m.resolved = true;
+        emit!(Resolved { market: m.key(), outcome: predicate_holds, kind: m.market_kind });
+        Ok(())
+    }
+
+    /// COMBOS (V2). Indexed multi-leg settlement via `validate_stat_v2`: every requested stat is covered
+    /// exactly once by a discrete predicate, and ONE CPI settles the whole same-match ticket atomically.
+    /// Full-coverage strategy — each leg `Single EqualTo` its claimed value (proves every leg authentic);
+    /// leg 0 must match the market's `stat_key`/`period`. Unlike V3 there is no shared multiproof: each
+    /// leg carries its own membership path. Fail-closed: a tampered leg reverts the whole CPI.
+    pub fn resolve_combo(ctx: Context<Resolve>, args: ValidateStatV2Args) -> Result<()> {
+        let m = &mut ctx.accounts.market;
+        require!(!m.resolved, EscrowError::AlreadyResolved);
+        require!(!m.cancelled, EscrowError::MarketCancelled);
+        require!(args.summary.fixture_id == m.fixture_id, EscrowError::FixtureMismatch);
+        let leg0 = args.stats_to_prove.first().ok_or(EscrowError::StatMismatch)?;
+        require!(
+            leg0.stat.key == m.stat_key && leg0.stat.period == m.period,
+            EscrowError::StatMismatch
+        );
+        // Indexed strategy: cover every proven stat with a Single EqualTo-its-value predicate.
+        let predicates: Vec<DiscretePredicate> = args
+            .stats_to_prove
+            .iter()
+            .enumerate()
+            .map(|(i, e)| DiscretePredicate::Single {
+                index: i as u8,
+                predicate: Predicate { threshold: e.stat.value, comparison: Comparison::EqualTo },
+            })
+            .collect();
+        let trailer = strategy_trailer(&predicates);
+        let predicate_holds = cpi_validate_stat_v2(
+            &ctx.accounts.txoracle_program,
+            &ctx.accounts.daily_scores_roots,
+            &args,
             &trailer,
         )?;
         m.outcome = predicate_holds;

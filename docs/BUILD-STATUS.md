@@ -3,9 +3,9 @@
 Compaction-proof memory + orchestrator window. Acceptance criteria authored up front; never weakened.
 PASS = watched it work. PENDING = not yet. BLOCKED = see `BLOCKED.md`.
 
-_Last updated: 2026-07-18 — **ALL 5 PHASES GREEN.** Escrow 10/10 · pricing 15/15 · e2e 0 errors.
-Only devnet deploy (P2.8) is parked (faucet dry — see BLOCKED.md); localnet is the proof of record.
-Every cut-line item landed, including the V3 batch stretch._
+_Last updated: 2026-07-18 — **ALL 5 PHASES GREEN.** Escrow **12/12** (V1+V2+V3 all settle on-chain) ·
+pricing 15/15 · e2e 0 errors. Only devnet deploy (P2.8) is parked (faucet dry — see BLOCKED.md);
+localnet is the proof of record. Every cut-line item landed, including the V3 batch stretch._
 
 ## The product in one line
 One platform, three market categories, all settled trustlessly on TxLINE-anchored data:
@@ -31,7 +31,7 @@ card") settle the NO side cryptographically.
 - [x] P2.2 local-validator suite green: V1 YES payout + claim  **PASS**
 - [x] P2.3 V1 NO payout — sentinel-zero "no red card" resolves NO-side cryptographically  **PASS**
 - [x] P2.4 tampered-proof revert (fail-closed) — market stays unresolved  **PASS**
-- [x] P2.5 V3 multi-leg batch settles 4 legs in ONE CPI  **PASS**
+- [x] P2.5 V2 Combo (validate_stat_v2 indexed strategy) settles a 3-leg ticket in ONE CPI + V3 multi-leg batch (4 legs, one CPI)  **PASS**
 - [x] P2.6 derived binary market (corner difference) settles in one CPI  **PASS**
 - [x] P2.7 cancel/timeout + refund path tested (both sides made whole)  **PASS**
 - [~] P2.8 deploy to devnet — **BLOCKED** (faucet dry, wallet 0 SOL); localnet-only is the proof of record per engine brief. See BLOCKED.md §1.
@@ -76,9 +76,12 @@ on-chain root". 0 console/page errors. Screenshots 01–09 in docs/screenshots/.
 5. V3 batch (stretch — the most impressive 30s if it lands)
 
 ## Notes / decisions
-- CPI crate + verify SDK ship **V1 + V3** helpers only (no V2 helper). The three product categories map:
-  Outcomes→V1, Combos→V3 full-coverage (one CPI covers every requested stat exactly once = the "indexed"
-  semantics a same-match ticket needs), Batch→V3 multiproof/derived. V2-helper gap logged in BLOCKED.md.
+- **All three generations settle on-chain: Outcomes→V1, Combos→V2, Batch→V3** — the submission's core
+  narrative ("keeper settles V1, V2, V3 in three transactions"). The vendored `txoracle-cpi` crate ships
+  V1 + V3 helpers only, so `cpi_validate_stat_v2` is a thin LOCAL adapter in the program (V2 = V3 minus
+  the shared multiproof; disc d0d7c2d6…, wire-format locked against the recorded golden fixture). V2
+  consumes the LIVE `/v1` multi-stat proof (each leg carries its own membership path) — no recorded
+  fixture needed. Combo capped at 3 legs by Anchor's JS coder 1000-byte instruction buffer (SDK limit).
 - Program keypair (stable): `onchain/programs/pulseplay-escrow/pulseplay_escrow-keypair.json`
   → program id `2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin`.
 - V3 proofs are NOT served by local `/v1`; the V3 settlement demo uses recorded fixtures in

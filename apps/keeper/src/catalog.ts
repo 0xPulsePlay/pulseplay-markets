@@ -29,7 +29,7 @@ export interface Market {
   title: string;
   subtitle: string;
   predicateLabel: string; // the exact on-chain predicate, in plain language
-  generation: "V1" | "V3"; // which validate_stat generation settles it
+  generation: "V1" | "V2" | "V3"; // which validate_stat generation settles it
   statKey: number;
   period: number;
   comparison: number; // 0 GT / 1 LT / 2 EQ
@@ -119,14 +119,13 @@ export async function buildCatalog(fixtureId: number = CONFIG.demoFixtureId): Pr
   const comboLegs: Leg[] = [
     { label: "England exactly 1 goal", statLabel: "England goals == 1", fairPct: outcomes.find((m) => m.id === "eng-exact-1")!.fairYesPct, margin: 0.06, source: "modeled prior" },
     { label: "Argentina exactly 2 goals", statLabel: "Argentina goals == 2", fairPct: argWin.fairYesPct, margin: 0.06, source: "1X2 de-margined Pct" },
-    { label: "England 1+ yellow card", statLabel: "England yellows ≥ 1", fairPct: 55, margin: 0.06, source: "modeled prior" },
-    { label: "Argentina 1+ yellow card", statLabel: "Argentina yellows ≥ 1", fairPct: 58, margin: 0.06, source: "modeled prior" },
+    { label: "England exactly 1 yellow", statLabel: "England yellows == 1", fairPct: 40, margin: 0.06, source: "modeled prior" },
   ];
   const combo = comboMarket("combo-final-scoreline", "The exact-final ticket", comboLegs, {
-    predicateLabel: "England goals==1 ∧ Argentina goals==2 ∧ both booked — one multiproof",
+    predicateLabel: "England goals==1 ∧ Argentina goals==2 ∧ both booked — one indexed strategy",
     statKey: 1, period: 5, comparison: 2, threshold: 1, combineOp: 0, kind: 1,
-    fixtureProofFile: "scores-proof-v3-18241006-keys1-2-3-4.json", expectedOutcome: true,
-    settlementNote: "One V3 multiproof covers all 4 legs; a single CPI settles the whole ticket atomically (validate_stat_v3, full coverage). Every requested stat covered exactly once.",
+    fixtureProofFile: "scores-proof-v2-18241006-keys1-2-3.json", expectedOutcome: true,
+    settlementNote: "validate_stat_v2 indexed strategy: every requested stat covered exactly once by a discrete predicate; ONE CPI settles the whole same-match ticket atomically. Each leg carries its own membership path (no shared multiproof — that's V3's job for batches).",
   });
 
   // batch — derived market: corner difference (home − away) via a binary predicate in one CPI.
@@ -166,7 +165,7 @@ function comboMarket(id: string, title: string, legs: Leg[], meta: { predicateLa
   const fairYesPct = (cmp.fairProbCorrelated ?? cmp.fairProbIndependent) * 100;
   return {
     id, category: "combos", kind: meta.kind, title, subtitle: `${legs.length}-leg same-match ticket`, predicateLabel: meta.predicateLabel,
-    generation: "V3", statKey: meta.statKey, period: meta.period, comparison: meta.comparison, threshold: meta.threshold, combineOp: meta.combineOp,
+    generation: "V2", statKey: meta.statKey, period: meta.period, comparison: meta.comparison, threshold: meta.threshold, combineOp: meta.combineOp,
     fixtureProofFile: meta.fixtureProofFile, settleable: true, expectedOutcome: meta.expectedOutcome, pricingSource: "de-margined",
     fairYesPct, fairNoPct: 100 - fairYesPct, bookYesPct: fairYesPct,
     fairYesOdds: cmp.fairOdds, bookYesOdds: cmp.bookOdds, marginTaxPct: cmp.marginTax * 100,

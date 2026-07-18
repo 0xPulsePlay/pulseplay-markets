@@ -7,8 +7,11 @@ best at:
 | Category | Example | Settled by |
 |---|---|---|
 | **Outcomes** — single-claim | England to score · a red card shown | **V1** `validate_stat` (one read-only PDA) |
-| **Combos** — same-match multi-leg | England scores ∧ Argentina 2+ ∧ both booked | **V3** multiproof, full coverage — **one CPI settles the ticket** |
+| **Combos** — same-match multi-leg | England 1 ∧ Argentina 2 ∧ England booked | **V2** `validate_stat_v2` — indexed strategy, **one CPI settles the ticket** |
 | **Batch** — mega-tickets & derived | corner difference · cross-period tickets | **V3** multiproof / derived binary |
+
+Deliberately, the three categories exercise **all three generations** of the TxLINE validation
+instruction — V1, V2, and V3 — settled by our own program in three transactions.
 
 The **proof is the resolution**: a settlement CPIs into the real TxLINE oracle, and a tampered proof
 reverts the CPI (fail-closed) so a bad proof can never settle. No committee, no dispute window. The

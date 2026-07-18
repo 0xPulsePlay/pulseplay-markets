@@ -79,6 +79,18 @@ function ticketArgs(v: any) {
   };
 }
 
+// V2 combo args = plural multi-stat proof (each leg carries its own membership path; no multiproof).
+function comboArgs(p: any) {
+  return {
+    ts: new BN(p.summary.updateStats.minTimestamp),
+    summary: summaryArg(p.summary),
+    subTreeProof: p.subTreeProof.map(node),
+    mainTreeProof: p.mainTreeProof.map(node),
+    eventStatRoot: p.eventStatRoot,
+    statsToProve: p.statsToProve.map((s: any, i: number) => ({ stat: s, statProof: p.statProofs[i].map(node) })),
+  };
+}
+
 const i64le = (n: number | BN) => new BN(n).toArrayLike(Buffer, "le", 8);
 const u32le = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
 const i32le = (n: number) => { const b = Buffer.alloc(4); b.writeInt32LE(n); return b; };
@@ -138,6 +150,9 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
   let resolve: string;
   if (m.generation === "V1") {
     resolve = await prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
+      .accounts({ market, dailyScoresRoots: DAILY, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+  } else if (m.generation === "V2") {
+    resolve = await prog.methods.resolveCombo(comboArgs(proof))
       .accounts({ market, dailyScoresRoots: DAILY, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else {
     resolve = await prog.methods.resolveTicket(ticketArgs(proof))

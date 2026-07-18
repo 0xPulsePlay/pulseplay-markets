@@ -15,8 +15,9 @@
 
 **On-chain (`@txline/verify` + `txoracle-cpi`)**
 - `statLeaf(stat)` / `describeStatKey(key)` — leaf hash + human labels for the proof receipt.
-- The oracle **CPI**: `validate_stat` (V1) and `validate_stat_v3` (V3 multiproof) from our
-  `pulseplay_escrow` program via the `txoracle-cpi` crate — settlement + fail-closed guarantee.
+- The oracle **CPI**: `validate_stat` (V1), `validate_stat_v2` (V2 indexed strategy — fed by the LIVE
+  `/v1` multi-stat proof, `statKeys=1,2,3`), and `validate_stat_v3` (V3 multiproof) from our
+  `pulseplay_escrow` program — settlement + fail-closed guarantee, all three generations.
 - `daily_scores_roots` PDA (`6d9bJ2Et…`) — the single read-only account each CPI reads.
 
 **Differentiators we lean on:** de-margined `Pct` = true probability (fair pricing is free data);
@@ -31,9 +32,11 @@ sentinel** so occurrence markets settle both sides; the full tick corpus makes t
    plural) shape would remove a footgun.
 2. **No V3 on `/v1`.** Multiproofs (`stat-validation-v3`) are upstream-only, so the V3 combo/batch demos
    run off recorded fixtures + a local validator. A `/v1` V3 proxy would let the whole flow be live.
-3. **CPI crate ships V1 + V3 but not V2.** `cpi_validate_stat_v2` doesn't exist even though the V2
-   discriminator is documented; we mapped Combos onto V3 full-coverage instead. A V2 helper (or a note
-   that V3 supersedes it) would clarify intent.
+3. **CPI crate ships V1 + V3 but not V2.** `cpi_validate_stat_v2` doesn't exist in `txoracle-cpi` even
+   though the V2 discriminator + `encodeValidateStatV2Data` are in the TS SDK. We added a thin local
+   `cpi_validate_stat_v2` adapter (V2 = V3 minus the multiproof, per the SDK's own docstring) — trivial,
+   but a shipped crate helper would save every consumer the reverse-engineering. Separately, Anchor's JS
+   coder caps instruction data at 1000 bytes, which limits a full-membership-path V2 ticket to ~3 legs.
 4. **PDA timestamp gotcha.** The `daily_scores_roots` seed / `ts` must come from
    `summary.updateStats.minTimestamp`, **not** `proof.ts` and not `Date.now()`. The builders handle it,
    but it cost time to confirm; worth flagging loudly in the docs.

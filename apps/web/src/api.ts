@@ -15,7 +15,7 @@ export interface Health {
 export interface Leg { label: string; statLabel: string; fairPct: number; margin: number; source: string; }
 export interface Market {
   id: string; category: "outcomes" | "combos" | "batch"; kind: number; title: string; subtitle: string;
-  predicateLabel: string; generation: "V1" | "V3"; statKey: number; period: number; comparison: number;
+  predicateLabel: string; generation: "V1" | "V2" | "V3"; statKey: number; period: number; comparison: number;
   threshold: number; combineOp: number; fixtureProofFile: string; settleable: boolean; expectedOutcome: boolean;
   pricingSource: "de-margined" | "modeled"; fairYesPct: number; fairNoPct: number; bookYesPct: number;
   fairYesOdds: number; bookYesOdds: number; marginTaxPct: number; legs?: Leg[];

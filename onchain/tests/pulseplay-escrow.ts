@@ -225,6 +225,53 @@ async function main() {
     ok(`P2.5 V3 combo: validate_stat_v3 verified 4 legs (keys 1,2,3,4) in ONE call (outcome=${m.outcome})`);
   }
 
+  // ── P2.5b COMBOS V2: indexed multi-leg via validate_stat_v2 (no multiproof), one CPI settles ticket ─
+  {
+    const kp = await newAuthority();
+    const alice = await newAuthority(); const bob = await newAuthority();
+    const p = load("scores-proof-v2-18241006-keys1-2-3.json").proof; // plural: statsToProve[] + statProofs[]
+    const leg0 = p.statsToProve[0]; // { key:1, value:1, period:5 }
+    const { market, vault } = marketPda(kp.publicKey, p.summary.fixtureId, leg0.key, leg0.period);
+    const v2Args = {
+      ts: new BN(p.summary.updateStats.minTimestamp),
+      summary: summaryArg(p.summary),
+      subTreeProof: p.subTreeProof.map(node),
+      mainTreeProof: p.mainTreeProof.map(node),
+      eventStatRoot: p.eventStatRoot,
+      statsToProve: p.statsToProve.map((s: any, i: number) => ({ stat: s, statProof: p.statProofs[i].map(node) })),
+    };
+    // "England 1 ∧ Argentina 2 ∧ Eng yellows 1 ∧ Arg yellows 3" — full-coverage EqualTo each → YES.
+    await program.methods.createMarket(new BN(p.summary.fixtureId), leg0.key, leg0.period, leg0.value, EQ, cutoff, deadline, OP_NONE, KIND_COMBO)
+      .accounts({ authority: kp.publicKey, market, vault, systemProgram: SystemProgram.programId }).signers([kp]).rpc();
+    const oneSol = new BN(LAMPORTS_PER_SOL);
+    await program.methods.deposit(true, oneSol.muln(2)).accounts({ depositor: alice.publicKey, market, vault, position: positionPda(market, alice.publicKey, true), systemProgram: SystemProgram.programId }).signers([alice]).rpc();
+    await program.methods.deposit(false, oneSol).accounts({ depositor: bob.publicKey, market, vault, position: positionPda(market, bob.publicKey, false), systemProgram: SystemProgram.programId }).signers([bob]).rpc();
+    await program.methods.resolveCombo(v2Args)
+      .accounts({ market, dailyScoresRoots: DAILY_SCORES_ROOTS, txoracleProgram: ORACLE })
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 10_000_000 })]).rpc();
+    const m = await program.account.market.fetch(market);
+    assert.equal(m.resolved, true, "V2 combo resolved via validate_stat_v2");
+    assert.equal(m.outcome, true, "all 4 legs matched their claimed values → YES");
+    ok(`P2.5b V2 combo: validate_stat_v2 indexed strategy settled a 3-leg ticket in ONE CPI (outcome=${m.outcome})`);
+    // fail-closed: tamper one leg's membership path → the oracle reverts the whole V2 CPI
+    const kp2 = await newAuthority();
+    const mm = marketPda(kp2.publicKey, p.summary.fixtureId, leg0.key, leg0.period);
+    await program.methods.createMarket(new BN(p.summary.fixtureId), leg0.key, leg0.period, leg0.value, EQ, cutoff, deadline, OP_NONE, KIND_COMBO)
+      .accounts({ authority: kp2.publicKey, market: mm.market, vault: mm.vault, systemProgram: SystemProgram.programId }).signers([kp2]).rpc();
+    const bad = JSON.parse(JSON.stringify(v2Args));
+    bad.ts = new BN(p.summary.updateStats.minTimestamp);
+    bad.summary.fixtureId = new BN(p.summary.fixtureId);
+    bad.summary.updateStats.minTimestamp = new BN(p.summary.updateStats.minTimestamp);
+    bad.summary.updateStats.maxTimestamp = new BN(p.summary.updateStats.maxTimestamp);
+    bad.statsToProve[1].statProof[0].hash[0] ^= 0xff;
+    await assert.rejects(
+      program.methods.resolveCombo(bad).accounts({ market: mm.market, dailyScoresRoots: DAILY_SCORES_ROOTS, txoracleProgram: ORACLE })
+        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 10_000_000 })]).rpc(),
+      "tampered V2 leg must revert the CPI");
+    assert.equal((await program.account.market.fetch(mm.market)).resolved, false, "tampered V2 stays unresolved");
+    ok("P2.5b V2 fail-closed: a tampered leg reverts the whole validate_stat_v2 CPI");
+  }
+
   // ── P2.6 BATCH V3 derived binary: corner difference (home − away) settled in one CPI ─────────────
   {
     const kp = await newAuthority();
