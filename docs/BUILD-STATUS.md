@@ -19,10 +19,10 @@ card") settle the NO side cryptographically.
 ---
 
 ## Phase 1 — Scaffold + data spine
-- [ ] P1.1 pnpm monorepo resolves (apps/web, apps/keeper, packages/pricing, onchain)
-- [ ] P1.2 `@txline/client-sdk` + `@txline/verify` installed from vendored tarballs
-- [ ] P1.3 engine client wired; `/v1/fixtures` + `/v1/corpus` reachable from app code
-- [ ] P1.4 fixtures segmented live / upcoming / finished; list renders (styling can come later)
+- [x] P1.1 pnpm monorepo resolves (apps/web, apps/keeper, packages/pricing, onchain)  **PASS**
+- [x] P1.2 `@txline/client-sdk` + `@txline/verify` installed from vendored tarballs  **PASS**
+- [x] P1.3 engine client wired; keeper serves `/api/fixtures` (0 live / 8 upcoming / 109 finished)  **PASS**
+- [ ] P1.4 fixtures segmented list RENDERS in the web UI (Phase 4)  PENDING
 
 ## Phase 2 — Anchor escrow program `pulseplay_escrow`
 - [x] P2.1 program builds (`anchor build`) — 7 instructions, id 2YbfXEyo…jvGin  **PASS**
@@ -38,10 +38,14 @@ _Evidence: `ANCHOR_PROVIDER_URL=http://127.0.0.1:8999 npx tsx tests/pulseplay-es
 PULSEPLAY ESCROW TESTS PASSED (10 checks)". Validator clones real oracle 9Exb… + PDA 6d9bJ2Et…._
 
 ## Phase 3 — Pricing package + keeper
-- [ ] P3.1 de-margined probabilities from engine odds (`Pct` field, no recompute)
-- [ ] P3.2 LMSR quoting seeded at fair prior (b=300); bounded-loss table
-- [ ] P3.3 parlay fair-vs-book comparison (∏ 1/(1+m) math)
-- [ ] P3.4 keeper loop: watch fixture stream → on game_finalised fetch validation payloads → settle → receipt record
+- [x] P3.1 de-margined probabilities from engine odds (`Pct` field, no recompute)  **PASS** (15/15 tests)
+- [x] P3.2 LMSR quoting seeded at fair prior (b=300); bounded-loss table  **PASS**
+- [x] P3.3 parlay fair-vs-book comparison (∏ 1/(1+m); 3 legs @6% → 84.0%)  **PASS**
+- [x] P3.4 keeper: /api/settle runs create→deposit→resolve→claim on-chain + writes proof receipt  **PASS**
+
+_Evidence: keeper on :4190 — /api/health {engine:true, chain:true}; /api/settle/eng-score → YES with
+receipt root match (computed == on-chain 0x8213ec7f…); /api/parlay 3-leg @6% → fair $673 vs book $565
+(84.0% ratio). Replay: 35 keyframes, clock 00:00→99:40, score+win-prob in sync._
 
 ## Phase 4 — Storefront UI (showpiece)
 - [ ] P4.1 PulsePlay palette (Ultraviolet Rolling Signal) applied

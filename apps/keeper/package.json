@@ -1,0 +1,30 @@
+{
+  "name": "@pulseplay/keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PulsePlay keeper + API: engine data, pricing, on-chain settlement, proof receipts.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "settle:demo": "tsx src/settleDemo.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@noble/hashes": "^1.5.0",
+    "@pulseplay/pricing": "workspace:*",
+    "@solana/web3.js": "^1.98.4",
+    "@txline/client-sdk": "file:../../vendor/txline-client-sdk-0.1.0.tgz",
+    "@txline/verify": "file:../../vendor/txline-verify-0.1.0.tgz",
+    "bn.js": "^5.2.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
