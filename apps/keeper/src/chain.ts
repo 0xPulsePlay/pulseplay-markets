@@ -39,18 +39,49 @@ function dailyScoresRootsPda(): anchor.web3.PublicKey {
   return new PublicKey(CONFIG.dailyScoresRootsPda);
 }
 
+/** The `daily_scores_roots` PDA for whichever epoch day a given proof's `minTimestamp` falls on — the
+ *  seed a LIVE devnet proof needs (there is no single fixed PDA there, unlike localnet's one cloned day). */
+const dailyScoresRootsPdaFromTimestamp = (oracleProgram: anchor.web3.PublicKey, minTimestampMs: number) => {
+  const epochDay = Math.floor(minTimestampMs / 86400000);
+  const seed = Buffer.alloc(2);
+  seed.writeUInt16LE(epochDay % 65536);
+  return PublicKey.findProgramAddressSync([Buffer.from("daily_scores_roots"), seed], oracleProgram)[0];
+};
+
+/**
+ * Fetch a REAL, live V1 stat-validation proof directly from TxLINE's devnet API (NOT the local engine,
+ * which only proxies mainnet — see docs/TXLINE-INTEGRATION.md "Devnet"). Returns null (falls back to
+ * the recorded fixture) on anything but a clean match — cluster != devnet, no cached devnet token,
+ * network hiccup, or a stat shape that doesn't match what the market expects.
+ */
+async function liveDevnetProof(statKey: number, period: number): Promise<any | null> {
+  if (CONFIG.cluster !== "devnet") return null;
+  try {
+    const { apiToken, jwt } = loadJson(CONFIG.devnetTokenCachePath);
+    const url = `${CONFIG.devnetTxlineApiBase}/api/scores/stat-validation?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKey=${statKey}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken } });
+    if (!res.ok) return null;
+    const p: any = await res.json();
+    if (p?.statToProve?.key !== statKey || p?.statToProve?.period !== period) return null;
+    return p;
+  } catch {
+    return null; // devnet token not obtained yet, or the API is unreachable — recorded fixture covers us
+  }
+}
+
 const loadJson = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 const node = (n: any) => ({ hash: n.hash, isRightSibling: n.isRightSibling });
 const hex = (bytes: number[]) => "0x" + Buffer.from(bytes).toString("hex");
 
 let _program: any | null = null;
 let _conn: anchor.web3.Connection | null = null;
+let _operator: anchor.web3.Keypair | null = null;
 function program() {
   if (_program) return _program;
   const idl = loadJson(IDL_PATH);
   _conn = new Connection(CONFIG.rpcUrl, "confirmed");
-  const payer = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
-  const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(payer), { commitment: "confirmed" });
+  _operator = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
+  const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(_operator), { commitment: "confirmed" });
   _program = new anchor.Program(idl, provider);
   return _program;
 }
@@ -189,6 +220,19 @@ async function airdrop(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, 
   await conn.confirmTransaction(sig, "confirmed");
 }
 
+/** Localnet: the free local-validator faucet (`airdrop`, instant, no real rate limit). Devnet: a
+ *  direct SOL transfer from the keeper's own (well-funded) operating wallet — the PUBLIC devnet
+ *  airdrop RPC is rate-limited hard enough to fail outright under any real usage (confirmed last
+ *  night — see BLOCKED.md), but an ordinary transfer from a wallet we already funded has no such limit. */
+async function fundGas(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, sol: number) {
+  if (CONFIG.cluster !== "devnet") return airdrop(conn, to, sol);
+  const from = _operator!;
+  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+  const tx = new anchor.web3.Transaction({ feePayer: from.publicKey, blockhash, lastValidBlockHeight })
+    .add(SystemProgram.transfer({ fromPubkey: from.publicKey, toPubkey: to, lamports: Math.round(sol * LAMPORTS_PER_SOL) }));
+  await anchor.web3.sendAndConfirmTransaction(conn, tx, [from], { commitment: "confirmed" });
+}
+
 export interface SettleResult {
   marketId: string;
   outcome: boolean;
@@ -214,14 +258,18 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
   const prog = program();
   const conn = _conn!;
   const mint = await wagerMint();
-  const proof = loadJson(join(FIXDIR, m.fixtureProofFile)).proof
+  // V1 (Outcomes) on devnet: try a LIVE proof straight from TxLINE's devnet API first — confirmed
+  // working (see docs/TXLINE-INTEGRATION.md "Devnet"). Falls back to the recorded fixture for V2/V3
+  // (not yet confirmed live) or if the live fetch fails for any reason (offline, no cached token, …).
+  const live = m.generation === "V1" ? await liveDevnetProof(m.statKey, m.period) : null;
+  const proof = live ?? (loadJson(join(FIXDIR, m.fixtureProofFile)).proof
     ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1 recorded files wrap under .proof
-    : loadJson(join(FIXDIR, m.fixtureProofFile)); // V3 files are bare
+    : loadJson(join(FIXDIR, m.fixtureProofFile))); // V3 files are bare
   const authority = Keypair.generate();
   const yesBettor = Keypair.generate();
   const noBettor = Keypair.generate();
   // SOL covers rent + gas only now; stakes move in the SPL wager token.
-  await Promise.all([airdrop(conn, authority.publicKey, 1), airdrop(conn, yesBettor.publicKey, 1), airdrop(conn, noBettor.publicKey, 1)]);
+  await Promise.all([fundGas(conn, authority.publicKey, 0.05), fundGas(conn, yesBettor.publicKey, 0.05), fundGas(conn, noBettor.publicKey, 0.05)]);
   const oneToken = 10 ** CONFIG.wagerMintDecimals;
   await Promise.all([fundTokens(yesBettor.publicKey, 5 * oneToken), fundTokens(noBettor.publicKey, 5 * oneToken)]);
 
@@ -253,11 +301,15 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
       position: posPda(noBettor.publicKey, false), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
     }).signers([noBettor]).rpc();
 
-  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 10_000_000 })];
+  // Localnet clones ONE daily_scores_roots PDA for the recorded fixture (fixed). A live devnet proof
+  // can land on any epoch day, so its PDA must be derived from the proof's own timestamp instead.
+  const dailyPda = live ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp) : dailyScoresRootsPda();
+
+  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
   let resolve: string;
   if (m.generation === "V1") {
     resolve = await prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
-      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else if (m.generation === "V2") {
     resolve = await prog.methods.resolveCombo(comboArgs(proof))
       .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
