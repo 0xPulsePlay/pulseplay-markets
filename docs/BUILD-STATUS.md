@@ -335,13 +335,29 @@ _Evidence (apps/keeper/src/engine.ts, apps/keeper/test/engine.test.ts, apps/web/
   Both are logged with root cause + fix in `docs/TXLINE-INTEGRATION.md`'s API-feedback list._
 
 
-**Phase 5 — demo script + docs**
-- [ ] P5.1 `docs/DEMO-PLAN.md` — beat-by-beat ≤5min walkthrough with a fallback per beat
-- [ ] P5.2 `STATUS-FOR-MIKAIL.md` + `docs/BUILD-STATUS.md` reflect actual final state
-- [ ] P5.3 final `BLOCKED.md` pass, honest and matching existing rigor
+**Phase 5 — demo script + docs** — **DONE**
+- [x] P5.1 `docs/DEMO-PLAN.md` written: 7 beats (pick match → ticket across all 3 categories → connect
+  wallet → fund → submit → replay to full time → settle V1/V2/V3 with step-by-step expansion → resolve/
+  claim your own ticket → proof receipt → sentinel-zero close), every beat actually run this session
+  (not aspirational), an explicit fallback per beat, a "90 seconds only" cut-down, and a devnet
+  addendum. **PASS**
+- [x] P5.2 `STATUS-FOR-MIKAIL.md` fully rewritten: a direct table mapping each of Mikail's specific
+  complaints to what's now true, verified end-to-end / real-vs-simulated / honest-rough-edges / run-it
+  / demo-script sections in the file's own established structure. `docs/BUILD-STATUS.md` (this file)
+  kept current phase-by-phase throughout, not just at the end. **PASS**
+- [x] P5.3 `BLOCKED.md` final pass: added §5 (V2/V3 live devnet resolve not attempted — V1 only, by
+  timebox choice, with an exact command to pick it up) and §6 (the market-PDA-collision finding from
+  Phase 3.4, resolved with a documented product-layer guard rather than a risky late on-chain change).
+  Matches the existing file's tone/rigor (what was tried, why, how to unblock). **PASS**
+- Fresh end-to-end verification for the record: one continuous Playwright run through every beat in
+  `docs/DEMO-PLAN.md` (pick fixture → 3 categories → connect/fund/submit → replay to full time at 12× →
+  settle all → expand step-by-step → resolve/claim own ticket → proof receipt), 0 console errors, plus a
+  390px mobile pass (no horizontal overflow). 13 fresh screenshots in `docs/screenshots/` replace the
+  stale pre-Night-2 set (which was missing the wallet UI and the multi-series chart entirely).
 
 ## PASS/PENDING table (Night 2)
-_Phases 0, 1, 2, 3, 4 all DONE (see evidence above). Full regression re-run clean after every merge:
-pricing 15/15, onchain escrow 15/15, keeper engine unit tests 34/34, both apps typecheck clean (pre-
-existing bn.js + server.ts `unknown` errors only — not introduced this session). Phase 5 (demo script +
-docs) is what's left._
+_ALL PHASES DONE: 0, 1, 2, 3, 4, 5. Full regression clean as of the final commit: pricing 15/15, onchain
+escrow 15/15, keeper engine unit tests 34/34, both apps typecheck clean (pre-existing bn.js +
+server.ts `unknown` errors only — present before this session, not introduced by it), full Playwright
+journey 0 console errors including a 390px mobile pass. See `STATUS-FOR-MIKAIL.md` for the
+handoff-level summary and `BLOCKED.md` for the two genuinely-still-open items (§5, §6)._
