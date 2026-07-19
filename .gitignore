@@ -22,3 +22,4 @@ receipts/
 apps/keeper/.cache/
 *.tsbuildinfo
 .solana-cfg/
+onchain/programs/pulseplay-escrow/pulseplay_escrow-keypair.json
