@@ -70,7 +70,7 @@ export async function fixtureCard(id: number): Promise<FixtureCard> {
 // ── Cinematic replay keyframes (match-clock semantics: real clock.seconds + real score) ────────────
 
 /**
- * Refined phase-band enum (Night 2 Phase 4 — was a crude `half: 1|2|0`). Regulation halves are
+ * Refined phase-band enum (was a crude `half: 1|2|0`). Regulation halves are
  * 45/90 real match-minutes; ET periods 105/120 when the fixture goes there. "stoppage" is its own
  * bucket rather than a per-half variant — visually it's a thin trailing shade on whichever half/ET
  * period is running, and text/labels still show the real clock underneath it.

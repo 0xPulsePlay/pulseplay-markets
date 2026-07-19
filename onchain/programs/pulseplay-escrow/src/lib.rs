@@ -15,8 +15,8 @@
 //!
 //! Escrow custody is a classic-SPL-Token vault: each market's vault is an Associated Token Account
 //! (ATA) owned by the market PDA itself (no separate vault PDA/bump — the market signs for its own
-//! vault). `deposit`/`claim`/`refund` move the market's fixed `mint` (devnet: a test "USDC" token —
-//! see docs/BUILD-STATUS.md Phase 1; mainnet-hackathon-rules-compliant: escrow is USDC/SOL/other,
+//! vault). `deposit`/`claim`/`refund` move the market's fixed `mint` (devnet: a test "USDC" token;
+//! mainnet-hackathon-rules-compliant: escrow is USDC/SOL/other,
 //! never the TxL credit token). A market is bound to its mint at `create_market` time and every
 //! later instruction re-checks the passed `mint` account against it (`WrongMint` on mismatch) so a
 //! bogus mint can never redirect state updates away from the market's real vault. SAFETY: local
@@ -480,7 +480,7 @@ pub struct CreateMarket<'info> {
         bump
     )]
     pub market: Account<'info, Market>,
-    /// The wagering token for this market (devnet: a test "USDC" mint — see docs/BUILD-STATUS.md).
+    /// The wagering token for this market (devnet: a test "USDC" mint).
     /// Recorded on `market.mint`; every later instruction re-checks against it.
     pub mint: Account<'info, Mint>,
     /// The market's vault: an Associated Token Account owned by the MARKET PDA itself (no separate

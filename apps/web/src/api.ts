@@ -24,7 +24,7 @@ export interface Market {
 }
 export interface Catalog { fixtureId: number; categories: { outcomes: Market[]; combos: Market[]; batch: Market[] }; }
 
-/** Refined phase-band enum (Night 2 Phase 4 replay overhaul) — mirrors apps/keeper/src/engine.ts. */
+/** Refined phase-band enum — mirrors apps/keeper/src/engine.ts. */
 export type MatchPhase = "pre-match" | "H1" | "HT" | "H2" | "ET1" | "ET2" | "stoppage" | "full-time";
 
 export interface ReplaySeriesDef { id: string; label: string; market: string; colorVar: string; }

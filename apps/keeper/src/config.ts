@@ -34,7 +34,7 @@ const CLUSTER_PRESETS: Record<Cluster, {
     // default is only a fallback for code paths that read CONFIG.dailyScoresRootsPda directly.
     dailyScoresRootsPda: "",
     // "PulsePlay USDC (Devnet Test)" — classic SPL Token, 6 decimals, minted 2026-07-19. NEVER real
-    // USDC; every UI surface must label it "devnet test token". See docs/BUILD-STATUS.md Phase 1.
+    // USDC; every UI surface must label it "devnet test token".
     wagerMint: "BPqAwt3dbUCQmbfeTmu8S4RPGedovb2zcd9DZ9Khd171",
     // The mint's authority is the deploy wallet (it minted the token), NOT the keeper's normal
     // operating wallet — the faucet (and localnet's self-serve mint) need to sign as this key.
@@ -61,7 +61,7 @@ export const CONFIG = {
   // Devnet-only: where get-devnet-token.mjs cached the subscribe->activate apiToken/JWT.
   devnetTokenCachePath: process.env.DEVNET_TOKEN_CACHE ?? new URL("../.cache/devnet-token.json", import.meta.url).pathname,
   devnetTxlineApiBase: process.env.DEVNET_TXLINE_API_BASE ?? "https://txline-dev.txodds.com",
-  // Phase 1: SPL wagering token. "" (localnet default) means chain.ts self-creates + caches one.
+  // SPL wagering token. "" (localnet default) means chain.ts self-creates + caches one.
   wagerMint: process.env.WAGER_MINT ?? preset.wagerMint,
   wagerMintDecimals: Number(process.env.WAGER_MINT_DECIMALS ?? 6),
   wagerMintLabel: process.env.WAGER_MINT_LABEL ?? (cluster === "devnet" ? "USDC · devnet test token" : "USDC · local test token"),

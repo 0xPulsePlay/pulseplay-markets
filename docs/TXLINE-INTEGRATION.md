@@ -24,7 +24,7 @@
 `validate_stat_v3` multiproof settles a whole multi-leg ticket in ONE CPI; **value=0 is a provable
 sentinel** so occurrence markets settle both sides; the full tick corpus makes the replay a real weapon.
 
-## API feedback (our experience building against it tonight)
+## API feedback (from building against the feed)
 
 1. **Single- vs multi-stat validation response shape is inconsistent.** `GET /v1/validation/scores` with
    one `statKey` returns singular `statToProve` / `statProof`; with several it returns plural
@@ -66,7 +66,7 @@ sentinel** so occurrence markets settle both sides; the full tick corpus makes t
     querying `wallEnd - 1` returns the real FINAL state cleanly. Worth flagging since `wallEnd` is
     otherwise the natural "end of the fixture" anchor per the SDK's own docstring.
 
-## Devnet (Night 2, 2026-07-19)
+## Devnet
 
 The local engine (`ENGINE_URL=http://localhost:3001`) only proxies **mainnet** TxLINE — it has no devnet
 mode. Devnet data/proofs are fetched by calling **`https://txline-dev.txodds.com` directly** (a
@@ -79,7 +79,7 @@ dry-run) really runs the subscribe→activate flow against the devnet program
 `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`, using the devnet TxL mint
 `4Zao8ocPhmMgq7PdsYWyxvqySMGx7xb9cMftPMkEokRG` (NOT the mainnet mint `Zhw9…` — a naive re-use of the
 mainnet mint fails the simulate with `IncorrectProgramId`; the correct devnet mint was cross-checked
-against the read-only `txline-explorer` reference before spending anything) and `serviceLevelId=1`
+and confirmed before spending anything) and `serviceLevelId=1`
 (the free World Cup/Friendlies bundle — devnet's free tier id is **1**, not 12 as on mainnet).
 Result: subscribe tx confirmed, `apiToken` activated, cached at `apps/keeper/.cache/devnet-token.json`
 (gitignored). Real cost: devnet SOL tx fees only (`0 Units` — the subscription itself is free).
@@ -95,7 +95,7 @@ uses the same key/value/period). A real proof for this exact seq/key was pulled 
 `eventStatRoot`, `summary`, `statProof`, `subTreeProof`, `mainTreeProof` — matches `ValidateStatArgs`
 exactly). **This means a genuinely live devnet `resolve_outcome` CPI against the real semifinal is
 possible** (fetch the proof from `txline-dev.txodds.com` at settle-time instead of loading a recorded
-fixture file), not just a recorded-fixture replay — see Phase 3 in `docs/BUILD-STATUS.md`.
+fixture file), not just a recorded-fixture replay.
 
 **Endpoint notes specific to the raw devnet surface** (differs from the local engine's `/v1/*`):
 - `GET /api/fixtures/snapshot?startEpochDay=N` — forward-30-day window FROM `startEpochDay`; pass an

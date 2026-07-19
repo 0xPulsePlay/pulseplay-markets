@@ -51,8 +51,7 @@ apps/keeper/      Express API (:4190): TxLINE ingestion, pricing, on-chain settl
                   wallet-signed ticket building. 34 hermetic engine tests + a 4-test receipt suite.
 apps/web/         Vite + React storefront (:4100): three categories, ticket builder, wallet connect,
                   cinematic tick-by-tick replay, and the proof-receipt view.
-docs/             BUILD-STATUS.md (acceptance criteria), TXLINE-INTEGRATION.md (endpoints + feedback),
-                  DEMO-PLAN.md, screenshots/.
+docs/             TXLINE-INTEGRATION.md (the TxLINE endpoints used + notes to TxODDS) and screenshots/.
 ```
 
 ---
@@ -110,8 +109,8 @@ An Express API on `:4190` that is the seam between TxLINE and the chain:
     including value-0 absence legs — in a single CPI; supports derived binary markets (Add/Subtract,
     e.g. corner difference).
 - **Fail-closed**: a malformed or tampered proof makes the oracle CPI revert, so state never changes
-  on a bad proof. The escrow suite proves this directly — flip one byte of a Merkle path and the
-  transaction reverts, market stays unresolved (checks P2.4, P2.5b, P2.7).
+  on a bad proof. The settlement suite proves this directly: flip one byte of a Merkle path and the
+  transaction reverts, and the market stays unresolved.
 - **Timeout path**: `cancel` / `refund` — anyone can cancel a still-unresolved market past its
   `resolve_deadline`, and every depositor reclaims their exact stake.
 
@@ -177,9 +176,9 @@ The local engine proxies only mainnet, so devnet proofs are fetched from the raw
 | `GET /api/fixtures/snapshot?startEpochDay=` | devnet fixture discovery (`scripts/get-devnet-token.mjs`) |
 | `GET /api/scores/snapshot/{fixtureId}` | full ordered score history for a fixture |
 
-> V2/V3 live-devnet proofs are not yet confirmed (the raw devnet multi-stat/multiproof shape was not
-> exercised this session), so Combos/Batch use recorded fixtures on devnet too — the same proven
-> mechanism they use on localnet. See `BLOCKED.md` §5. Nothing is claimed that the code doesn't do.
+> V2/V3 live-devnet proofs are not yet confirmed (the raw devnet multi-stat/multiproof shape is not
+> yet wired), so Combos/Batch use recorded fixtures on devnet too — the same proven mechanism they use
+> on localnet. Nothing here is claimed that the code doesn't do.
 
 ---
 
@@ -255,10 +254,8 @@ pnpm --filter @pulseplay/keeper start        # http://localhost:4190/api/health
 pnpm --filter @pulseplay/web dev             # http://localhost:4100
 ```
 
-Run against devnet instead with `CLUSTER=devnet` (see `STATUS-FOR-MIKAIL.md` → "Run it"); on devnet,
-Outcomes (V1) settle from a Merkle proof fetched **live** from `txline-dev.txodds.com` at the moment
-you click Settle.
+Run against devnet instead with `CLUSTER=devnet`; on devnet, Outcomes (V1) settle from a Merkle proof
+fetched **live** from `txline-dev.txodds.com` at the moment you click Settle.
 
-**More detail:** `docs/TXLINE-INTEGRATION.md` (endpoints + our API feedback), `docs/BUILD-STATUS.md`
-(full acceptance criteria), `docs/DEMO-PLAN.md` (beat-by-beat demo), `BLOCKED.md` (what is honestly
-still open).
+**More detail:** `docs/TXLINE-INTEGRATION.md` — the exact TxLINE endpoints the app consumes, and our
+notes back to TxODDS on building against the feed.

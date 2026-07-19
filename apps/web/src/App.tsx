@@ -30,7 +30,7 @@ export function App() {
 
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2600); }, []);
 
-  // Re-fetch the catalog whenever the selected fixture changes (Phase 2: the fixtures list is
+  // Re-fetch the catalog whenever the selected fixture changes (the fixtures list is
   // clickable). `undefined` fixtureId defers to the keeper's own demo-fixture default, so the very
   // first load behaves exactly as before a fixture is ever picked.
   useEffect(() => {

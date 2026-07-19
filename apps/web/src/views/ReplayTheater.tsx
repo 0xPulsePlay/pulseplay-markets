@@ -222,7 +222,7 @@ function SettlementSteps({ settled, health, onOpenReceipt }: { settled: Settled;
 }
 
 /** For a CONNECTED wallet: any market the wallet itself deposited into (via TicketBuilder's "Submit
- *  ticket" — Phase 3.2) gets its own resolve+claim flow here, independent of the keeper's fake-bettor
+ *  ticket") gets its own resolve+claim flow here, independent of the keeper's fake-bettor
  *  demo-settle button above. Resolve is permissionless (keeper-paid); claim needs the wallet's own
  *  signature. This is what actually shows a real wallet balance moving, not just the demo mechanics. */
 function WalletSettlementPanel({ catalog, atFullTime, health, flash }: { catalog: Catalog; atFullTime: boolean; health: Health | null; flash: (m: string) => void }) {

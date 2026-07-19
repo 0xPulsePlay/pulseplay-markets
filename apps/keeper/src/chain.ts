@@ -93,7 +93,7 @@ function program() {
   return _program;
 }
 
-// ── SPL wagering token (Phase 1) ─────────────────────────────────────────────────────────────────
+// ── SPL wagering token ───────────────────────────────────────────────────────────────────────────
 // devnet: CONFIG.wagerMint is the real "PulsePlay USDC (Devnet Test)" mint, authority = the deploy
 // wallet. localnet: no stable mint survives a validator --reset, so the keeper creates + caches its
 // OWN fresh test mint on first use (mint authority = the keeper's own wallet — same trust boundary as
@@ -229,8 +229,8 @@ async function airdrop(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, 
 
 /** Localnet: the free local-validator faucet (`airdrop`, instant, no real rate limit). Devnet: a
  *  direct SOL transfer from the keeper's own (well-funded) operating wallet — the PUBLIC devnet
- *  airdrop RPC is rate-limited hard enough to fail outright under any real usage (confirmed last
- *  night — see BLOCKED.md), but an ordinary transfer from a wallet we already funded has no such limit. */
+ *  airdrop RPC is rate-limited hard enough to fail outright under any real usage, but an ordinary
+ *  transfer from a wallet we already funded has no such limit. */
 async function fundGas(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, sol: number) {
   if (CONFIG.cluster !== "devnet") return airdrop(conn, to, sol);
   const from = _operator!;
@@ -266,13 +266,13 @@ const store = new Map<string, SettleResult>();
 export const getSettlement = (id: string) => store.get(id);
 export const allSettlements = () => [...store.values()];
 
-// ── Phase 3: wallet-signed transactions ─────────────────────────────────────────────────────────
+// ── Wallet-signed transactions ─────────────────────────────────────────────────────────────────────
 // The keeper builds these (it already has the Anchor Program + IDL loaded) but does NOT sign them —
 // it returns an unsigned, base64-encoded VersionedTransaction with `feePayer = wallet` for the
 // CLIENT to sign with Phantom and submit itself. This is the actual "wallet deposits into the vault"
 // flow (distinct from settleMarket()'s self-contained fake-bettor demo flow above, which stays
-// untouched — see docs/BUILD-STATUS.md Phase 3 for why they're deliberately separate market
-// instances: a connected wallet's OWN market PDA is keyed off the wallet's own pubkey as authority).
+// untouched — they are deliberately separate market instances: a connected wallet's OWN market PDA is
+// keyed off the wallet's own pubkey as authority).
 
 export interface WalletMarketInfo {
   market: string; vault: string; position: string; exists: boolean; cutoffTs: number | null; resolved: boolean | null;
@@ -449,7 +449,7 @@ export interface ResolveWalletMarketResult {
   vaultBaseUnits: string; mintDecimals: number; mintLabel: string; live: boolean;
 }
 
-/** Resolves a CONNECTED WALLET's own market (created via buildDepositTransaction — Phase 3.2) using a
+/** Resolves a CONNECTED WALLET's own market (created via buildDepositTransaction) using a
  *  real settlement proof. The keeper pays gas and is the tx signer, but this is NOT a trust shortcut:
  *  resolve is permissionless on-chain (no signer field on the Resolve accounts beyond the fee payer)
  *  precisely so ANYONE — not just the depositor — can settle once a real proof exists. Claiming any

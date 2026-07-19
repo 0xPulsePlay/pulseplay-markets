@@ -40,7 +40,7 @@ app.get("/api/fixtures", wrap(async (_req, res) => res.json(await segmentedFixtu
 app.get("/api/fixtures/:id", wrap(async (req, res) => res.json(await fixtureCard(Number(req.params.id)))));
 app.get("/api/fixtures/:id/replay", wrap(async (req, res) => res.json(await buildReplay(Number(req.params.id)))));
 
-// ?fixtureId= scopes the catalog to any fixture (Phase 2: the fixtures list is now clickable); omitted
+// ?fixtureId= scopes the catalog to any fixture (the fixtures list is clickable); omitted
 // defaults to the demo fixture exactly as before. /api/catalog/:id kept for existing callers.
 app.get("/api/catalog", wrap(async (req, res) => {
   const fixtureId = req.query.fixtureId ? Number(req.query.fixtureId) : CONFIG.demoFixtureId;
@@ -89,7 +89,7 @@ app.get("/api/settlement/:marketId", wrap(async (req, res) => {
   res.json(s);
 }));
 
-// ── Phase 3: wallet-connected ticket submission ──────────────────────────────────────────────────
+// ── Wallet-connected ticket submission ────────────────────────────────────────────────────────────
 // The keeper builds these transactions (it has the Anchor Program + IDL) but never signs them; the
 // CLIENT signs with Phantom and submits itself. See chain.ts for why a connected wallet gets its OWN
 // market instance (authority = the wallet) rather than reusing settleMarket()'s fake-bettor markets.

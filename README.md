@@ -25,20 +25,20 @@ your payout — the storefront shows the fair-vs-book gap on every market and th
 ## What's here
 
 ```
-onchain/          Anchor workspace — pulseplay_escrow program (V1 + V3 settlement, cancel/refund) + txoracle-cpi crate
-                  + a 10-check local-validator suite against the REAL cloned oracle
+onchain/          Anchor workspace — pulseplay_escrow program (V1/V2/V3 settlement, cancel/refund) + txoracle-cpi crate
+                  + a 15-check local-validator suite against the REAL cloned oracle
 packages/pricing/ de-margined probabilities · LMSR seeded at the fair prior · parlay fair-vs-book · Gaussian copula (15 tests)
 apps/keeper/      Express API (:4190): engine data, pricing, on-chain settlement, proof receipts
 apps/web/         Vite + React storefront (:4100): three categories, ticket builder, cinematic replay, PROOF RECEIPT view
-docs/             BUILD-STATUS.md (acceptance criteria), TXLINE-INTEGRATION.md (endpoints + feedback), screenshots/
+docs/             TXLINE-INTEGRATION.md (the TxLINE endpoints used + notes back to TxODDS) + screenshots/
 ```
 
 ## Quickstart
 
-See **[STATUS-FOR-MIKAIL.md](./STATUS-FOR-MIKAIL.md)** for the exact run commands, what's verified
-end-to-end, honest rough edges, and the 4-minute demo script. TL;DR: start a local validator that clones
-the oracle, deploy `pulseplay_escrow`, run the escrow suite (`npx tsx tests/pulseplay-escrow.ts`), then
-`pnpm --filter @pulseplay/keeper start` + `pnpm --filter @pulseplay/web dev`.
+See **[TECHNICAL.md](./TECHNICAL.md)** for the full run commands and architecture. TL;DR: start a
+local validator that clones the oracle, deploy `pulseplay_escrow`, run the escrow suite (`npx tsx
+tests/pulseplay-escrow.ts`), then `pnpm --filter @pulseplay/keeper start` + `pnpm --filter
+@pulseplay/web dev`.
 
 ## Trust & safety
 Local validator + devnet only — **no code path signs or submits a mainnet transaction or spends SOL.**

@@ -81,7 +81,7 @@ const B = 300; // LMSR liquidity subsidy per market (spec guidance)
 
 /**
  * Builds the three-category catalog for ANY fixture, not just the demo one — clicking a fixture in
- * the storefront (Phase 2) scopes here. The stat KEYS (1=home goals, 2=away goals, 5=home red cards,
+ * the storefront scopes here. The stat KEYS (1=home goals, 2=away goals, 5=home red cards,
  * 7/8=corners) are TxLINE's universal soccer schema, so pricing/predicates generalize cleanly to any
  * fixture. What does NOT generalize is on-chain settlement: the recorded Merkle proof fixtures in
  * `onchain/fixtures/` were only ever captured for the demo fixture (`CONFIG.demoFixtureId`), so

@@ -10,7 +10,7 @@
  *   P2.6  V3 derived binary — corner diff     (Batch / resolve_ticket, Binary Subtract in one CPI)
  *   P2.7  tampered V3 leg reverts + cancel/refund timeout path
  *
- * Night 2 / Phase 1 — escrow custody moved from native SOL to a classic-SPL-Token vault (an ATA owned
+ * Escrow custody uses a classic-SPL-Token vault (an ATA owned
  * by the market PDA). Every section above is unchanged in BEHAVIOR (side tracking, winner-take-all
  * math, cancel/refund, fail-closed proofs) — only the asset-movement plumbing changed from
  * `system_program::transfer` to `anchor_spl::token::transfer`. New checks:
@@ -20,7 +20,7 @@
  *   P1.4b wrong-mint claim/refund accounts are rejected (WrongMint)
  *
  * SAFETY: localhost only. Nothing signs mainnet. The mint created below is a fresh LOCAL test token —
- * not the real devnet "USDC (Devnet Test)" mint (that one lives on devnet; see docs/BUILD-STATUS.md).
+ * not the real devnet "USDC (Devnet Test)" mint (that one lives on devnet).
  */
 import anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
