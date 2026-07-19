@@ -100,3 +100,56 @@ green match preserved). Screenshots 10-mobile-storefront, 11-mobile-replay added
   → program id `2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin`.
 - V3 proofs are NOT served by local `/v1`; the V3 settlement demo uses recorded fixtures in
   `onchain/fixtures/` + local validator (per engine brief §7.4 / §11).
+
+---
+
+# Night 2 — devnet + USDC + demo-navigability (2026-07-19)
+
+Mikail's hands-on review of `d064b84` found the build technically correct but not demo-navigable.
+Brief: devnet deploy, a real devnet USDC-like SPL token for escrow, a real fixture picker, wallet
+connect + on-chain ticket submission, a richer replay chart, and a judge-ready demo script.
+Acceptance criteria authored up front (2026-07-19 08:5x UTC) — PASS/PENDING table below, never weakened.
+
+## Acceptance criteria
+
+**Phase 0 — devnet baseline (timeboxed ~45-60min)**
+- [ ] P0.1 `onchain/scripts/get-devnet-token.mjs` dry-runs the subscribe→activate flow against devnet; real run only if dry-run is clean
+- [ ] P0.2 Outcome (success or logged BLOCKED) recorded either way, doesn't stall later phases
+- [ ] P0.3 `anchor build -- --features devnet` + deploy to devnet with the funded deploy-authority wallet; `[programs.devnet]` in Anchor.toml
+- [ ] P0.4 keeper cluster/RPC/programId/oracleProgram/dailyScoresRootsPda/wallet-path all env-driven; localnet default behavior unchanged; `CLUSTER=devnet` boots + `/api/health` chain:true against devnet
+
+**Phase 1 — USDC devnet wagering token (branch `nightshift/usdc-escrow`, prove on localnet first)**
+- [ ] P1.1 devnet SPL token minted (classic Token program, 6 decimals, symbol USDC, name labeled "(Devnet Test)")
+- [ ] P1.2 every UI surface showing the token labels it as a devnet test token, never bare "USDC"
+- [ ] P1.3 escrow program rewritten to SPL-token vault (ATA owned by market PDA); deposit/claim/refund use token transfer CPIs; behavior (side tracking, winner-take-all math, cancel/refund, fail-closed) unchanged
+- [ ] P1.4 all 12 existing localnet checks still pass + new token-path checks (e.g. wrong-mint rejection) — TDD, localnet first
+- [ ] P1.5 redeployed to devnet (same program id); devnet-verifiable paths (create-market/deposit/cancel/refund) proven as far as possible without live oracle proof; gaps logged in BLOCKED.md
+- [ ] P1.6 devnet faucet path (mint test USDC + gas SOL to any wallet, no rate limit)
+- [ ] P1.7 keeper updated for token-account-based vault/deposit/claim
+- [ ] P1.8 merged to main only after full suite green + docs updated honestly
+
+**Phase 2 — fixture picker / navigation**
+- [ ] P2.1 `GET /api/catalog` (+ replay) accepts `fixtureId` query param, defaults preserved
+- [ ] P2.2 fixtures list is genuinely clickable — picking a fixture scopes the storefront to it
+- [ ] P2.3 flag coverage noted (lower priority; extend only if time allows)
+- [ ] P2.4 copy/clarity pass on Storefront + MarketCard — plain-language one-liner per category
+
+**Phase 3 — wallet connect + real ticket submission + visible settlement**
+- [ ] P3.1 Phantom wallet-connect (`window.phantom.solana`), `@solana/web3.js` + SPL token client deps added to web
+- [ ] P3.2 TicketBuilder gets a real terminal action: connected wallet signs+submits a client-side deposit tx into the market vault, cluster-aware, shows confirmed signature
+- [ ] P3.3 "Fund my wallet" faucet action (devnet SOL for gas + devnet USDC for stakes)
+- [ ] P3.4 settlement visualization: vault YES/NO balances, wallet balance before/after, step-by-step CPI lifecycle indicator, every signature a real explorer link
+
+**Phase 4 — replay chart overhaul**
+- [ ] P4.1 `buildReplay()` pulls odds ticks for markets actually relevant to the catalog, not just 1X2
+- [ ] P4.2 each market its own labeled line/series with a legend
+- [ ] P4.3 visual HT/2H/ET/stoppage bands + separated pre-match segment
+- [ ] P4.4 no regression on cinematic continuous rendering at fast-forward (explicitly tested)
+
+**Phase 5 — demo script + docs**
+- [ ] P5.1 `docs/DEMO-PLAN.md` — beat-by-beat ≤5min walkthrough with a fallback per beat
+- [ ] P5.2 `STATUS-FOR-MIKAIL.md` + `docs/BUILD-STATUS.md` reflect actual final state
+- [ ] P5.3 final `BLOCKED.md` pass, honest and matching existing rigor
+
+## PASS/PENDING table (Night 2)
+_Updated as phases land — see entries above; table intentionally starts all-PENDING._
