@@ -478,3 +478,70 @@ instance on :4100/:4190) — PASS/PENDING table below, never weakened.
 
 **The single most important fact for the demo: V1, V2, and V3 all settle live on devnet, with real
 cryptographic on-chain root verification, right now.** No honest-fallback framing needed for Phase D.
+
+## Phase C + E — replay, live odds, and betting on ONE page; fixture picker to the top — **DONE**
+- [x] Merged the old Storefront -> "Watch the replay" -> separate ReplayTheater route into one
+  `MatchWorkspace.tsx` (renamed from ReplayTheater.tsx, Storefront.tsx deleted). App.tsx's `View` type
+  drops "replay" entirely; the topbar loses its "Replay" nav tab. **PASS**
+- [x] `FixturePicker.tsx` (new) pinned at the top of the main column — segmented Live/Upcoming/Completed
+  tabs (reusing `GET /api/fixtures`'s existing server-side segmentation, just relocated + made prominent),
+  horizontally-scrolling strip so 110+ completed fixtures don't push the page down. **PASS**
+- [x] Scoreboard + playback transport + chart render inline, always on the same page — falls back to a
+  graceful "hasn't been played yet" card for fixtures with no tick history instead of an empty chart.
+  **PASS**
+- [x] **The actual "watch odds move while you bet" wiring**: `Market` gained an optional `liveSeriesId`
+  (catalog.ts) for the two Outcomes markets whose fair price is already computed from a TxLINE series
+  `buildReplay()` also plots (engine.ts's generic ids "ou-goals-over-0.5"/"1x2-away", stable across any
+  fixture). `MatchWorkspace.tsx` extends the replay's `interpolate()` to also linearly interpolate every
+  series value at the current scrub position and blends it into the displayed market's fairYesPct/
+  fairNoPct live, with a "live" pill distinguishing it from the static modeled markets. The SAME
+  live-blended market object is what gets added to the ticket on click, so payout math reflects the price
+  actually shown at click time. Verified end-to-end (Playwright): scrubbing visibly moved "England to
+  score" 62.2% (static snapshot) -> 52.0% -> 47.9% as progress advanced; clicking YES at 47.9% and
+  submitting produced a real confirmed devnet tx with that exact price recorded in the ticket panel. 0
+  console errors. **PASS**
+- [x] **Found + fixed a real bug while building this**: the fixture picker's horizontal-scroll strip blew
+  the ENTIRE page out to ~20000px wide instead of scrolling within its own card — CSS Grid items default
+  to `min-width:auto` (content-based), and both `.grid-main` and `.theater` are grid containers with no
+  override, so a non-wrapping flex row two levels down sized the whole grid track off its raw content
+  width. Fixed with `min-width: 0` on `.grid-main > *`, `.theater > *`, and `.fixture-scroll`. Verified at
+  1400px desktop and 390px mobile (`scrollWidth === clientWidth` at both, 0 console errors). **PASS**
+- [x] Regression-checked: Combos/Batch tabs render correctly, the Proof receipt view still opens from a
+  settled market and "Back to markets" correctly returns to the unified page, the wallet settlement panel
+  ("Your tickets") still renders. Full regression: keeper 53/53, tsc clean (both apps), web build clean.
+  **PASS**
+
+## Phase F — strip test-environment chrome for demo polish — **DONE**
+- [x] Removed the LOCALNET/DEVNET topbar chip and "SIMULATED MONEY" badge. The "chain live"/"chain
+  offline" scorecard status chip Mikail described turned out to already be gone as a side effect of the
+  Phase C hero rewrite (confirmed by grep on the rendered app). **PASS**
+- [x] Reworded "devnet test token" qualifiers out of prominent copy: WalletWidget's "Connected devnet-test
+  wallet" -> "Connected wallet", its balance row + helper caption drop the qualifier in favor of plain
+  "USDC" and a neutral funding description; ProofReceiptView's hardcoded (and, incidentally, never
+  actually cluster-aware) "localnet"/"simulated money" badges removed entirely; settlement step
+  descriptions (chain.ts) narrate plain "USDC" instead of the full label. **PASS**
+- [x] Preserved per the brief's guardrails: never claims "LIVE" for a replay (still says "Replay"); the
+  one remaining "devnet" mention is a hover tooltip inside opt-in expandable detail (a substantive
+  authenticity claim, not chrome); `CONFIG.wagerMintLabel` itself is unchanged (still accurate in every API
+  payload, only the prominent DISPLAY copy shortened); internal docs (this file, BLOCKED.md, code
+  comments) untouched — scoped to user-facing UI chrome only; "TXLINE SETTLED" badge kept (a real feature
+  claim, not a test-env admission). **PASS**
+- [x] Verified: grepped the rendered app for every banned string (LOCALNET/DEVNET/SIMULATED MONEY/"devnet
+  test"/"chain offline"/"chain live") — none present. 0 console errors. **PASS**
+
+## Phase G — logo fix — **DONE**
+- [x] Screenshotted the actual topbar logo first (per Mikail: "take a look and you'll see for yourself")
+  before touching anything. Found two real problems: the SVG's embedded `<style>` used `'DIN Alternate'`
+  (not a real web font — silently fell back to a generic system sans, reading thin/small/off-brand), and
+  the 1280x300 viewBox had ~40% dead canvas to the right of the actual visible content, so at any fixed
+  CSS height the glyphs rendered much smaller than the element's footprint suggested. **PASS**
+- [x] Fixed both: added an `@import` for Oswald directly inside the SVG's own `<style>` (an `<img src>`
+  is a separate document context — can't inherit the host page's font-face), reordered `.display`'s font
+  stack to prefer Oswald, then measured the ACTUAL rendered content bounds with a headless-browser
+  `getBBox()` pass (re-measured after the font swap, since Oswald's letterforms differ from the fallback)
+  and cropped the viewBox tightly to the real bounds (`56 57 623 175`, down from `0 0 1280 300`) instead
+  of guessing offsets by eye. Removed the SVG's own opaque background rect (redundant once cropped).
+  Bumped the topbar CSS height 22px->26px (18px->21px mobile) on top of the crop for a deliberate size
+  increase. **PASS**
+- [x] Verified visually before/after at desktop and 390px mobile — wordmark now reads as bold Oswald,
+  properly proportioned against the icon mark, no wasted whitespace, no overflow. **PASS**
