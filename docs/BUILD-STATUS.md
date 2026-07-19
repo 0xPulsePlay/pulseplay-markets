@@ -388,3 +388,93 @@ keeper `tsc` errors — bn.js declarations + a `server.ts` `unknown` narrowing �
 so `apps/keeper` and `apps/web` both `tsc --noEmit` at 0 errors), full Playwright journey 0 console errors
 including a 390px mobile pass. See `STATUS-FOR-MIKAIL.md` for the handoff-level summary and `BLOCKED.md`
 for the two genuinely-still-open items (§5, §6)._
+
+---
+
+# Night 3 — first hands-on click-through fixes (2026-07-19)
+
+Mikail's first hands-on click-through of the merged, verified build (`main @ 5d3a93b`) found real
+problems that only show up when an actual human drives it: a "fetch failed" on ticket submission, a
+stale "LOCALNET" chip, "Fund my wallet" not working, a separate-page replay flow instead of odds-while-
+betting, an undefined demo flow across V1/V2/V3, a bottom-of-page fixture picker, and test-environment
+chrome cluttering what should read as a finished product. Acceptance criteria authored up front
+(2026-07-19, ports keeper :4295 / web :4205 / own local validator :8999, isolated from the live review
+instance on :4100/:4190) — PASS/PENDING table below, never weakened.
+
+## Phase A — the two reported bugs (P0) — **DONE**
+- [x] **"Fetch failed" on ticket submission — root cause found and fixed.** Reproduced Mikail's exact
+  flow with Playwright (a mocked Phantom bridged to a real ed25519 signer, never claude-in-chrome) against
+  a from-scratch keeper instance. Root cause: `CONFIG.cluster` defaulted to `"localnet"`
+  (`apps/keeper/src/config.ts`), which requires a locally-running Solana validator at `127.0.0.1:8999`. On
+  a plain restart (no manually-passed `CLUSTER`/`SOLANA_RPC_URL`/`*_WALLET_PATH` env vars — exactly how a
+  keeper restart works if nobody remembers the 4 extra flags), nothing is listening there, so any
+  RPC-touching endpoint threw Node's raw `TypeError: fetch failed` straight through to the browser —
+  verbatim the string Mikail saw. Fixed by making `devnet` the actual compiled-in default (verified
+  against the real deployed devnet program), with `CLUSTER=localnet` preserved as a fully-working explicit
+  override. The devnet preset also had to point the keeper's own operating wallet at the funded deploy
+  wallet, not the 0-SOL `~/.config/solana/id.json` default — otherwise a plain devnet restart would have
+  silently reintroduced the old "faucet dry" blocker for every on-chain write the keeper itself signs.
+  4 regression tests (`config.test.ts`) — red/green verified: reverted the fix, watched all 3 assertions
+  fail for the documented reasons, restored the fix, watched them pass. **PASS**
+- [x] **"Still says local net" — same root cause, doubly confirmed.** `App.tsx`'s topbar badge falls back
+  to `health?.network ?? "localnet"` whenever the health fetch fails — which it does exactly when the
+  keeper is stuck on the broken localnet default above. Fixed by the same config default change (Phase F
+  later removes this chip from the UI entirely for demo polish, but the underlying dishonesty — showing
+  "localnet" when the intent was devnet — is fixed at the source either way). **PASS**
+- [x] **"Fund my wallet" not working — same root cause a third time.** `POST /api/faucet` calls
+  `Connection.getBalance`/`sendAndConfirmTransaction` against `CONFIG.rpcUrl`; with the broken localnet
+  default and no local validator running, this failed identically to the ticket-submission bug. Verified
+  fixed end-to-end: connect wallet → Fund my wallet → 500 USDC + 0.25 SOL land in the wallet, real tx sig.
+  **PASS**
+- [x] **Defense in depth: raw `"fetch failed"` is never shown to the user again, even for a genuine
+  future transient RPC outage.** Extracted `describeError()` (`apps/keeper/src/errors.ts`) — translates
+  Node's bare undici `"fetch failed"` / `ECONNREFUSED`/`ENOTFOUND`/`ETIMEDOUT` causes into a message naming
+  the actual RPC endpoint + cluster; every other application error (validation errors, "unknown market",
+  the market-PDA-collision guard's message, …) passes through completely unchanged — this is strictly
+  MORE specific than before, never vaguer. 4 tests (`errors.test.ts`). **PASS**
+- [x] **Runtime verification, not just unit tests.** Full happy path re-run end-to-end against a plain
+  `pnpm --filter @pulseplay/keeper start` (zero env vars) + fresh web instance: connect → fund → pick a
+  market → submit ticket → real confirmed tx signature ("market created + deposited"), 0 console errors,
+  0 failed network requests. Screenshot: `docs/screenshots/night3-*` (see Phase D walkthrough set). **PASS**
+
+## Phase B — devnet as the real default + all 3 generations live on devnet (P0) — **DONE, exceeded the brief**
+- [x] **V1, V2, AND V3 all now genuinely settle LIVE on devnet** — not the honest-fallback contingency the
+  brief allowed for, the actual full live path, confirmed with real on-chain transactions:
+  - V1 `eng-score`: live proof, resolve tx confirmed, receipt's on-chain root reconstruction matches.
+  - V1 `red-card` (sentinel-zero): live proof, outcome NO, the "value 0 is provable" story intact live.
+  - V2 `combo-final-scoreline`: live proof, resolve tx confirmed, on-chain root match **true**.
+  - V3 `batch-corner-diff`: live proof, resolve tx confirmed, on-chain root match **true**.
+  Root cause of the previous gap (BLOCKED.md §5's open question): probed the raw upstream devnet API
+  (`txline-dev.txodds.com`) directly and found it DOES serve live V2/V3 proofs — via a different query
+  shape than assumed: **V2 needs the plural `statKeys=1,2,3`** (not V1's singular `statKey=`) against the
+  same `stat-validation` endpoint, and **V3 lives at a `-v3`-suffixed endpoint**
+  (`stat-validation-v3?statKeys=7,8`), returning the exact `statsToProve[{stat,statProof}]` + `multiproof`
+  shape `ticketArgs()` already consumed for the recorded-fixture path. `liveDevnetProof()` now branches on
+  `m.generation`; `Market` gained an optional `liveStatKeys` field so catalog entries declare their full
+  stat-key set. **PASS**
+- [x] **Fixed a real crash-on-devnet bug found along the way**: `resolveOnChain()`'s V2/V3 branches called
+  the FIXED `daily_scores_roots` PDA unconditionally (only V1's branch used the correct per-timestamp PDA)
+  — so even the recorded-fixture FALLBACK crashed outright on devnet with "no fixed daily_scores_roots PDA
+  configured". Now any devnet resolve (live or fallback) computes the PDA from the proof's own anchored
+  timestamp. Localnet is provably unaffected — the added condition is `live || cluster === "devnet"`, both
+  false there, byte-identical to the prior code path — reconfirmed by re-running the full onchain escrow
+  suite (15/15 green) plus a fresh localnet keeper HTTP settle of all three generations. **PASS**
+- [x] **Fixed a separate, serious robustness bug found while stress-testing this**: the public devnet RPC
+  (`api.devnet.solana.com`) rate-limits hard under burst load (a single `settleMarket()` call fires 3
+  concurrent gas transfers + 2 concurrent token mints); under load, `@solana/web3.js`'s retry-on-429 client
+  eventually throws from OUTSIDE the request's own promise chain, which — by Node's default since v15 —
+  **killed the entire keeper process**. Reproduced the crash live (stack trace + process exit), added a
+  top-level crash guard (`process.on("unhandledRejection"/"uncaughtException", …)`) since every route
+  handler here is stateless per-request, then reproduced 3 concurrent settle calls post-fix: 2 legitimate
+  429s came back as ordinary 500 JSON errors, the keeper stayed alive and serving the whole time. A keeper
+  that dies mid-demo on a transient public-RPC hiccup would have been far worse than one that logs and
+  keeps going. **PASS** (verified at the runtime tier — a hermetic unit test for "the whole process doesn't
+  exit" is inherently awkward to construct safely; documented here per the testing-protocol's tiered
+  approach rather than forced into an unnatural unit test)
+- [x] 7 new hermetic tests (`liveDevnetProof.test.ts`) lock in the exact live query shape per generation
+  via a mocked `fetch` + a fixture token cache — never touches the real network, so this can't silently
+  regress. Full keeper suite **53/53 green**, `tsc --noEmit` clean, onchain escrow suite **15/15 green**.
+  **PASS**
+
+**The single most important fact for the demo: V1, V2, and V3 all settle live on devnet, with real
+cryptographic on-chain root verification, right now.** No honest-fallback framing needed for Phase D.
