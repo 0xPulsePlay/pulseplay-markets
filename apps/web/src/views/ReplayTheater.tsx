@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Catalog, type Health, type ReplayData, type ReplayKeyframe, type ReplaySeriesDef, type PhaseBand, type MatchPhase, type Market } from "../api";
+import { api, type Catalog, type Health, type ReplayData, type ReplayKeyframe, type ReplaySeriesDef, type PhaseBand, type MatchPhase, type Market, type WalletMarketInfo, type ResolveWalletMarketResult } from "../api";
 import type { Settled } from "../App";
 import { Flag } from "../components/Flags";
-import { IconPlay, IconPause, IconReplay, IconBolt, IconShield, IconCheck, IconChevron } from "../components/icons";
+import { useWallet } from "../wallet/WalletContext";
+import { IconPlay, IconPause, IconReplay, IconBolt, IconShield, IconCheck, IconChevron, IconWallet, IconSpinner } from "../components/icons";
 
 const SPEEDS = [1, 4, 12];
 const BASE_MS = 30000; // full match plays in 30s at 1× — cinematic, continuous, never compressed to mush
@@ -166,20 +167,153 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
         </div>
         {!atFullTime && <div className="tiny faint" style={{ marginTop: 8 }}>Play to full time to arm settlement.</div>}
         {Object.keys(settlements).length > 0 && (
-          <div className="stack" style={{ marginTop: "var(--pp-space-3)", gap: 8 }}>
+          <div className="stack" style={{ marginTop: "var(--pp-space-3)", gap: 4 }}>
             {Object.values(settlements).map((s) => (
-              <div key={s.result.marketId} className="row spread" style={{ borderTop: "1px solid var(--pp-color-border)", paddingTop: 8 }}>
-                <span className="row" style={{ gap: 8 }}><IconCheck size={14} className="tick" style={{ color: "var(--pp-color-verified)" } as any} />
-                  <span style={{ fontSize: "var(--pp-text-sm)" }}>{s.receipt.statLabel}</span>
-                  <span className="pill mono">{s.result.generation}</span>
-                </span>
-                <button className="row tiny txlink" onClick={() => onOpenReceipt(s.result.marketId)}>
-                  {s.result.txids.resolve.slice(0, 10)}… <IconChevron size={13} />
-                </button>
-              </div>
+              <SettlementSteps key={s.result.marketId} settled={s} health={health} onOpenReceipt={onOpenReceipt} />
             ))}
           </div>
         )}
+      </div>
+
+      {catalog && <WalletSettlementPanel catalog={catalog} atFullTime={atFullTime} health={health} flash={flash} />}
+    </div>
+  );
+}
+
+/** Step-by-step CPI lifecycle for one settled market — create -> deposit x2 -> resolve (the oracle
+ *  CPI) -> claim, each its own real explorer link, instead of one opaque post-hoc tx link. Collapsed
+ *  by default (it's per-market detail, not the headline), expands on click. */
+function SettlementSteps({ settled, health, onOpenReceipt }: { settled: Settled; health: Health | null; onOpenReceipt: (id: string) => void }) {
+  const wallet = useWallet();
+  const [open, setOpen] = useState(false);
+  const s = settled.result;
+  const explorer = (tx: string) => wallet.explorerTx ? wallet.explorerTx(tx) : `https://explorer.solana.com/tx/${tx}?cluster=${health?.explorerCluster ?? "custom&customUrl=http://127.0.0.1:8999"}`;
+  const potFmt = (Number(s.potBaseUnits) / 10 ** s.mintDecimals).toFixed(2);
+
+  return (
+    <div style={{ borderTop: "1px solid var(--pp-color-border)", paddingTop: 8 }}>
+      <button className="row spread" style={{ width: "100%", background: "none", border: "none", cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
+        <span className="row" style={{ gap: 8 }}>
+          <IconCheck size={14} style={{ color: "var(--pp-color-verified)" } as any} />
+          <span style={{ fontSize: "var(--pp-text-sm)" }}>{settled.receipt.statLabel}</span>
+          <span className="pill mono">{s.generation}</span>
+          {s.liveProof && <span className="pill" title="This proof was fetched live from TxLINE's devnet API at settle time, not a recorded fixture">live proof</span>}
+        </span>
+        <span className="row tiny faint" style={{ gap: 6 }}>
+          vault {potFmt} {s.mintLabel.split(" · ")[0]} → 0 <IconChevron size={13} className={open ? "rot" : ""} />
+        </span>
+      </button>
+      {open && (
+        <div className="stack" style={{ gap: 6, marginTop: 8, marginLeft: 22 }}>
+          {s.steps.map((step) => (
+            <div key={step.label} className="row spread" style={{ gap: 8 }}>
+              <div>
+                <div className="tiny" style={{ fontWeight: 600 }}>{step.label}</div>
+                <div className="tiny faint" style={{ maxWidth: 480 }}>{step.description}</div>
+              </div>
+              <a className="tiny txlink" href={explorer(step.tx)} target="_blank" rel="noreferrer">{step.tx.slice(0, 8)}…</a>
+            </div>
+          ))}
+          <button className="tiny txlink" style={{ textAlign: "left" }} onClick={() => onOpenReceipt(s.marketId)}>open the full proof receipt →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** For a CONNECTED wallet: any market the wallet itself deposited into (via TicketBuilder's "Submit
+ *  ticket" — Phase 3.2) gets its own resolve+claim flow here, independent of the keeper's fake-bettor
+ *  demo-settle button above. Resolve is permissionless (keeper-paid); claim needs the wallet's own
+ *  signature. This is what actually shows a real wallet balance moving, not just the demo mechanics. */
+function WalletSettlementPanel({ catalog, atFullTime, health, flash }: { catalog: Catalog; atFullTime: boolean; health: Health | null; flash: (m: string) => void }) {
+  const wallet = useWallet();
+  const settleables = [...catalog.categories.outcomes.filter((m) => m.settleable), ...catalog.categories.combos, ...catalog.categories.batch];
+  const [statuses, setStatuses] = useState<Record<string, WalletMarketInfo>>({});
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [outcomes, setOutcomes] = useState<Record<string, ResolveWalletMarketResult>>({});
+  const [claimed, setClaimed] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!wallet.connected || !wallet.publicKey) { setStatuses({}); return; }
+    let cancelled = false;
+    Promise.all(settleables.map((m) => api.walletMarket(wallet.publicKey!, m.id).then((info) => [m.id, info] as const).catch(() => null)))
+      .then((rows) => { if (!cancelled) setStatuses(Object.fromEntries(rows.filter((r): r is [string, WalletMarketInfo] => !!r))); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.connected, wallet.publicKey, catalog.fixtureId]);
+
+  const mine = settleables.filter((m) => statuses[m.id]?.exists);
+  if (!wallet.connected || mine.length === 0) return null;
+
+  async function resolveMine(m: Market) {
+    setBusy((b) => ({ ...b, [m.id]: true }));
+    try {
+      const r = await api.resolveWalletMarket(wallet.publicKey!, m.id);
+      setOutcomes((o) => ({ ...o, [m.id]: r }));
+      flash(r.resolveTx ? `Resolved ${m.title}: ${r.winningSide}` : `${m.title} already resolved: ${r.winningSide}`);
+    } catch (e) {
+      flash(`Resolve failed: ${(e as Error).message}`);
+    } finally {
+      setBusy((b) => ({ ...b, [m.id]: false }));
+    }
+  }
+  async function claimMine(m: Market) {
+    setBusy((b) => ({ ...b, [m.id]: true }));
+    try {
+      const built = await api.buildClaim(wallet.publicKey!, m.id);
+      const sig = await wallet.signAndSend(built.transactionBase64);
+      setClaimed((c) => ({ ...c, [m.id]: sig }));
+      flash(`Claimed ${m.title} — winnings sent to your wallet`);
+    } catch (e) {
+      flash(`Claim failed: ${(e as Error).message}`);
+    } finally {
+      setBusy((b) => ({ ...b, [m.id]: false }));
+    }
+  }
+
+  return (
+    <div className="card panel">
+      <div className="row" style={{ gap: 10, marginBottom: 10 }}>
+        <IconWallet size={18} />
+        <div>
+          <strong>Your tickets</strong>
+          <div className="tiny muted">Markets you personally deposited into with your connected wallet — resolve is permissionless (the keeper pays gas), claiming needs your own signature.</div>
+        </div>
+      </div>
+      {!atFullTime && <div className="tiny faint">Play to full time before resolving — the proof only exists once the match has a final result.</div>}
+      <div className="stack" style={{ gap: 8 }}>
+        {mine.map((m) => {
+          const resolved = outcomes[m.id];
+          const isBusy = !!busy[m.id];
+          const claimTx = claimed[m.id];
+          return (
+            <div key={m.id} className="row spread" style={{ borderTop: "1px solid var(--pp-color-border)", paddingTop: 8 }}>
+              <div>
+                <div style={{ fontSize: "var(--pp-text-sm)", fontWeight: 600 }}>{m.title}</div>
+                {resolved && (
+                  <div className="tiny" style={{ color: resolved.outcome ? "var(--pp-color-yes)" : "var(--pp-color-no)" }}>
+                    resolved {resolved.outcome ? "YES" : "NO"} · vault {(Number(resolved.vaultBaseUnits) / 10 ** resolved.mintDecimals).toFixed(2)} {resolved.mintLabel.split(" · ")[0]}
+                    {claimTx ? " · claimed" : ""}
+                  </div>
+                )}
+                {claimTx && (
+                  <a className="tiny txlink" href={wallet.explorerTx(claimTx)} target="_blank" rel="noreferrer">{claimTx.slice(0, 10)}…</a>
+                )}
+              </div>
+              {!resolved ? (
+                <button className="btn ghost" disabled={!atFullTime || isBusy} onClick={() => resolveMine(m)}>
+                  {isBusy ? <IconSpinner size={14} className="spin" /> : "Resolve"}
+                </button>
+              ) : !claimTx ? (
+                <button className="btn primary" disabled={isBusy} onClick={() => claimMine(m)}>
+                  {isBusy ? <IconSpinner size={14} className="spin" /> : "Claim winnings"}
+                </button>
+              ) : (
+                <span className="pill">done</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

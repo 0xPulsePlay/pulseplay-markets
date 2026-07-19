@@ -233,6 +233,8 @@ async function fundGas(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, 
   await anchor.web3.sendAndConfirmTransaction(conn, tx, [from], { commitment: "confirmed" });
 }
 
+export interface SettleStep { label: string; description: string; tx: string }
+
 export interface SettleResult {
   marketId: string;
   outcome: boolean;
@@ -244,6 +246,10 @@ export interface SettleResult {
   market: string; // market PDA
   vault: string; // the market's SPL token vault (an ATA owned by the market PDA)
   txids: { create: string; depositYes: string; depositNo: string; resolve: string; claim: string };
+  /** The same 5 txids as an ordered, human-readable CPI lifecycle — create -> deposit x2 -> resolve
+   *  (the oracle CPI) -> claim — for a step-by-step visualization instead of one opaque blocking call. */
+  steps: SettleStep[];
+  liveProof: boolean; // true if this resolve used a proof fetched live from devnet, not a recorded fixture
   settledAt: number;
   proofFile: string;
   generation: "V1" | "V2" | "V3";
@@ -272,6 +278,21 @@ function walletMarketPda(prog: any, wallet: anchor.web3.PublicKey, m: Market) {
   return market;
 }
 
+/**
+ * The on-chain `market` PDA is seeded only by (authority, fixture_id, stat_key, period) — NOT
+ * comparison/threshold/combine_op/kind. Several catalog entries deliberately share a (statKey,
+ * period) with a DIFFERENT predicate (e.g. "England to score" and "England exactly 1 goal" are both
+ * statKey=1/period=5 — one `> 0`, the other `== 1`), which is fine for settleMarket()'s demo flow
+ * (fresh random authority per call, so they never collide) but WOULD collide for a single connected
+ * wallet's own market instances (same authority = the wallet). Guard against silently treating "a
+ * market exists at this PDA" as "MY market for catalog entry X" when it's actually a different
+ * catalog entry's market that happens to share the PDA.
+ */
+function marketMatchesCatalogEntry(acct: any, m: Market): boolean {
+  return acct.threshold === m.threshold && acct.comparison === m.comparison
+    && acct.combineOp === m.combineOp && acct.marketKind === m.kind;
+}
+
 export async function walletMarketStatus(walletB58: string, m: Market): Promise<WalletMarketInfo> {
   const prog = program();
   const conn = _conn!;
@@ -282,6 +303,11 @@ export async function walletMarketStatus(walletB58: string, m: Market): Promise<
   const info = await conn.getAccountInfo(market);
   if (!info) return { market: market.toBase58(), vault: vault.toBase58(), position: "", exists: false, cutoffTs: null, resolved: null };
   const acct = await prog.account.market.fetch(market);
+  if (!marketMatchesCatalogEntry(acct, m)) {
+    // A market DOES exist at this PDA, but for a DIFFERENT catalog entry that shares the same
+    // (statKey, period) — not "my ticket" for THIS entry.
+    return { market: market.toBase58(), vault: vault.toBase58(), position: "", exists: false, cutoffTs: null, resolved: null };
+  }
   const position = PublicKey.findProgramAddressSync(
     [Buffer.from("position"), market.toBuffer(), wallet.toBuffer(), Buffer.from([1])], prog.programId)[0];
   return { market: market.toBase58(), vault: vault.toBase58(), position: position.toBase58(), exists: true, cutoffTs: acct.cutoffTs.toNumber(), resolved: acct.resolved };
@@ -305,6 +331,16 @@ export async function buildDepositTransaction(walletB58: string, m: Market, side
   const instructions: anchor.web3.TransactionInstruction[] = [];
   const marketInfo = await conn.getAccountInfo(market);
   const createdMarket = !marketInfo;
+  if (!createdMarket) {
+    // The PDA is only seeded by (authority, fixtureId, statKey, period) — a DIFFERENT catalog entry
+    // sharing that same pair (e.g. "England to score" vs "England exactly 1 goal", both statKey=1/
+    // period=5) would otherwise silently deposit into the WRONG market's predicate. Fail loudly
+    // instead — see marketMatchesCatalogEntry().
+    const existing = await prog.account.market.fetch(market);
+    if (!marketMatchesCatalogEntry(existing, m)) {
+      throw new Error(`this wallet already has a different open market for the same underlying stat (statKey ${m.statKey}/period ${m.period}) — one wallet can hold only one market per (stat, period) pair at a time; try a different market or a fresh wallet`);
+    }
+  }
   if (createdMarket) {
     // Generous window (a week) — this market is created live, on demand, by whoever bets on it first;
     // it needs to stay open long enough for a keeper settle pass to reach it after the replay's "full
@@ -371,6 +407,75 @@ export async function walletBalances(walletB58: string): Promise<WalletBalances>
 }
 
 /** Run the full trustless lifecycle for a market on-chain. Idempotent-ish: re-runs with a fresh authority. */
+/**
+ * The market's settlement proof: a LIVE devnet proof for V1 markets when available (confirmed working
+ * — see docs/TXLINE-INTEGRATION.md "Devnet"), else the recorded fixture. Shared by settleMarket() and
+ * resolveWalletMarket() so both settlement paths use identically-sourced proofs.
+ */
+async function fetchSettlementProof(m: Market): Promise<{ proof: any; live: boolean }> {
+  const live = m.generation === "V1" ? await liveDevnetProof(m.statKey, m.period) : null;
+  const proof = live ?? (loadJson(join(FIXDIR, m.fixtureProofFile)).proof
+    ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1 recorded files wrap under .proof
+    : loadJson(join(FIXDIR, m.fixtureProofFile))); // V3 files are bare
+  return { proof, live: !!live };
+}
+
+/** Resolves the CPI generation-appropriate instruction for `market` against `proof`. Permissionless
+ *  on-chain (no signer beyond the fee payer — the proof itself is the authority), so the keeper's own
+ *  wallet can resolve ANY market, including one a connected wallet deposited into. */
+async function resolveOnChain(prog: any, market: anchor.web3.PublicKey, m: Market, proof: any, live: boolean): Promise<string> {
+  const dailyPda = live ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp) : dailyScoresRootsPda();
+  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
+  if (m.generation === "V1") {
+    return prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
+      .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+  } else if (m.generation === "V2") {
+    return prog.methods.resolveCombo(comboArgs(proof))
+      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+  }
+  return prog.methods.resolveTicket(ticketArgs(proof))
+    .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+}
+
+export interface ResolveWalletMarketResult {
+  outcome: boolean; winningSide: "YES" | "NO"; resolveTx: string; market: string; vault: string;
+  vaultBaseUnits: string; mintDecimals: number; mintLabel: string; live: boolean;
+}
+
+/** Resolves a CONNECTED WALLET's own market (created via buildDepositTransaction — Phase 3.2) using a
+ *  real settlement proof. The keeper pays gas and is the tx signer, but this is NOT a trust shortcut:
+ *  resolve is permissionless on-chain (no signer field on the Resolve accounts beyond the fee payer)
+ *  precisely so ANYONE — not just the depositor — can settle once a real proof exists. Claiming any
+ *  winnings still requires the wallet's own signature (buildClaimTransaction). */
+export async function resolveWalletMarket(walletB58: string, m: Market): Promise<ResolveWalletMarketResult> {
+  const prog = program();
+  const mint = await wagerMint();
+  const wallet = new PublicKey(walletB58);
+  const market = walletMarketPda(prog, wallet, m);
+  const info = await _conn!.getAccountInfo(market);
+  if (!info) throw new Error("this wallet has no market for that leg yet — submit a ticket first");
+  const before = await prog.account.market.fetch(market);
+  if (before.resolved) {
+    const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+    const vaultBal = await _conn!.getTokenAccountBalance(vault).catch(() => ({ value: { amount: "0" } }));
+    return {
+      outcome: before.outcome, winningSide: before.outcome ? "YES" : "NO", resolveTx: "",
+      market: market.toBase58(), vault: vault.toBase58(), vaultBaseUnits: vaultBal.value.amount,
+      mintDecimals: CONFIG.wagerMintDecimals, mintLabel: CONFIG.wagerMintLabel, live: false,
+    };
+  }
+  const { proof, live } = await fetchSettlementProof(m);
+  const resolveTx = await resolveOnChain(prog, market, m, proof, live);
+  const after = await prog.account.market.fetch(market);
+  const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const vaultBal = await _conn!.getTokenAccountBalance(vault).catch(() => ({ value: { amount: "0" } }));
+  return {
+    outcome: after.outcome, winningSide: after.outcome ? "YES" : "NO", resolveTx,
+    market: market.toBase58(), vault: vault.toBase58(), vaultBaseUnits: vaultBal.value.amount,
+    mintDecimals: CONFIG.wagerMintDecimals, mintLabel: CONFIG.wagerMintLabel, live,
+  };
+}
+
 export async function settleMarket(m: Market): Promise<SettleResult> {
   const prog = program();
   const conn = _conn!;
@@ -378,10 +483,7 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
   // V1 (Outcomes) on devnet: try a LIVE proof straight from TxLINE's devnet API first — confirmed
   // working (see docs/TXLINE-INTEGRATION.md "Devnet"). Falls back to the recorded fixture for V2/V3
   // (not yet confirmed live) or if the live fetch fails for any reason (offline, no cached token, …).
-  const live = m.generation === "V1" ? await liveDevnetProof(m.statKey, m.period) : null;
-  const proof = live ?? (loadJson(join(FIXDIR, m.fixtureProofFile)).proof
-    ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1 recorded files wrap under .proof
-    : loadJson(join(FIXDIR, m.fixtureProofFile))); // V3 files are bare
+  const { proof, live } = await fetchSettlementProof(m);
   const authority = Keypair.generate();
   const yesBettor = Keypair.generate();
   const noBettor = Keypair.generate();
@@ -418,22 +520,7 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
       position: posPda(noBettor.publicKey, false), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
     }).signers([noBettor]).rpc();
 
-  // Localnet clones ONE daily_scores_roots PDA for the recorded fixture (fixed). A live devnet proof
-  // can land on any epoch day, so its PDA must be derived from the proof's own timestamp instead.
-  const dailyPda = live ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp) : dailyScoresRootsPda();
-
-  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
-  let resolve: string;
-  if (m.generation === "V1") {
-    resolve = await prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
-      .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
-  } else if (m.generation === "V2") {
-    resolve = await prog.methods.resolveCombo(comboArgs(proof))
-      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
-  } else {
-    resolve = await prog.methods.resolveTicket(ticketArgs(proof))
-      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
-  }
+  const resolve = await resolveOnChain(prog, market, m, proof, live);
   const account = await prog.account.market.fetch(market);
   const outcome: boolean = account.outcome;
 
@@ -445,11 +532,22 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
       position: posPda(winner.publicKey, outcome), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
     }).signers([winner]).rpc();
 
+  const oneTokenFmt = (n: number) => (n / oneToken).toFixed(2);
+  const steps: SettleStep[] = [
+    { label: "1 · Create market", description: `On-chain market opened for ${m.title} (predicate: ${m.predicateLabel}).`, tx: create },
+    { label: "2 · Deposit — YES", description: `${oneTokenFmt(2 * oneToken)} ${CONFIG.wagerMintLabel} staked on YES.`, tx: depositYes },
+    { label: "3 · Deposit — NO", description: `${oneTokenFmt(oneToken)} ${CONFIG.wagerMintLabel} staked on NO. Vault now holds ${oneTokenFmt(3 * oneToken)}.`, tx: depositNo },
+    { label: `4 · Resolve (${m.generation} oracle CPI)`, description: live
+      ? `A LIVE proof fetched from TxLINE's devnet API at settle time was verified by a real ${m.generation === "V1" ? "validate_stat" : m.generation === "V2" ? "validate_stat_v2" : "validate_stat_v3"} CPI. Outcome: ${outcome ? "YES" : "NO"}.`
+      : `A recorded TxLINE Merkle proof was verified by a real ${m.generation === "V1" ? "validate_stat" : m.generation === "V2" ? "validate_stat_v2" : "validate_stat_v3"} CPI. Outcome: ${outcome ? "YES" : "NO"}.`, tx: resolve },
+    { label: "5 · Claim", description: `The ${outcome ? "YES" : "NO"}-side winner swept the ${oneTokenFmt(3 * oneToken)}-token pot. Vault now holds 0.`, tx: claim },
+  ];
+
   const result: SettleResult = {
     marketId: m.id, outcome, winningSide: outcome ? "YES" : "NO", potBaseUnits: String(3 * oneToken),
     mint: mint.toBase58(), mintDecimals: CONFIG.wagerMintDecimals, mintLabel: CONFIG.wagerMintLabel,
     market: market.toBase58(), vault: vault.toBase58(), txids: { create, depositYes, depositNo, resolve, claim },
-    settledAt: Date.now(), proofFile: m.fixtureProofFile, generation: m.generation,
+    steps, liveProof: live, settledAt: Date.now(), proofFile: m.fixtureProofFile, generation: m.generation,
   };
   store.set(m.id, result);
   return result;

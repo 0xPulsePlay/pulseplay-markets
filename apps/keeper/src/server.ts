@@ -7,7 +7,7 @@ import { segmentedFixtures, fixtureCard, buildReplay } from "./engine.js";
 import { buildCatalog, type Market } from "./catalog.js";
 import {
   settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements, faucetFund,
-  walletBalances, walletMarketStatus, buildDepositTransaction, buildClaimTransaction,
+  walletBalances, walletMarketStatus, buildDepositTransaction, buildClaimTransaction, resolveWalletMarket,
 } from "./chain.js";
 
 const app = express();
@@ -118,6 +118,17 @@ app.post("/api/tickets/build-claim", wrap(async (req, res) => {
   const m = await findMarket(marketId);
   if (!m) return res.status(404).json({ error: "unknown market" });
   const result = await buildClaimTransaction(wallet, m);
+  res.json(result);
+}));
+
+// Resolve a connected wallet's OWN market (permissionless on-chain — the keeper pays gas and signs,
+// but the proof is what actually authorizes the outcome). Claiming any winnings still needs the
+// wallet's own signature via /api/tickets/build-claim.
+app.post("/api/wallet/:wallet/market/:marketId/resolve", wrap(async (req, res) => {
+  const m = await findMarket(req.params.marketId);
+  if (!m) return res.status(404).json({ error: "unknown market" });
+  if (!m.settleable) return res.status(400).json({ error: "this fixture has no recorded settlement proof" });
+  const result = await resolveWalletMarket(req.params.wallet, m);
   res.json(result);
 }));
 

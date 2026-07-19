@@ -243,17 +243,47 @@ doesn't own._
   test USDC to the wallet's ATA (mint authority, no rate limit) + sends gas SOL as a direct transfer
   from a funded wallet (sidesteps the public devnet airdrop's hard rate limit). "Fund my wallet" button
   in the wallet panel; verified live. **PASS**
-- [ ] P3.4 settlement visualization: vault YES/NO balances, wallet balance before/after, step-by-step
-  CPI lifecycle indicator, every signature a real explorer link. **PENDING — deliberately sequenced
-  after Phase 4 merges**, since both touch `ReplayTheater.tsx`'s settlement panel and running them
-  in parallel across two worktrees would guarantee a merge conflict there.
+- [x] P3.4 settlement visualization — **DONE**, two halves:
+  (a) **Demo settle step-by-step**: `SettleResult` gained a `steps: SettleStep[]` array (Create →
+  Deposit YES → Deposit NO → Resolve [the oracle CPI] → Claim), each with a plain-language description
+  and its own real tx signature/explorer link, plus `liveProof: boolean`. `ReplayTheater.tsx`'s
+  `SettlementSteps` renders this as an expandable per-market timeline (collapsed by default — headline
+  stays "vault 3.00 USDC → 0", expands to the full 5-step CPI lifecycle) instead of one opaque tx link.
+  (b) **Wallet-connected resolve + claim**: new `chain.ts` `resolveWalletMarket()` resolves a connected
+  wallet's OWN market (from Phase 3.2's ticket submission) — permissionless on-chain (no signer beyond
+  the fee payer; the proof is the authority), so the keeper pays gas. `POST
+  /api/wallet/:wallet/market/:marketId/resolve`. Claiming still needs the wallet's own signature
+  (`buildClaimTransaction`, already built). `ReplayTheater.tsx`'s new `WalletSettlementPanel` ("Your
+  tickets") shows each of the wallet's own markets with Resolve → Claim buttons, live vault balance,
+  and the wallet's own topbar balance visibly changing after claim.
+  **Real bug found + fixed while verifying (b), not caught by earlier standalone tests**: the on-chain
+  `market` PDA is seeded only by `(authority, fixtureId, statKey, period)` — NOT
+  comparison/threshold/combineOp/kind. Several catalog entries deliberately share a (statKey, period)
+  with a different predicate (e.g. "England to score" and "England exactly 1 goal" are both
+  statKey=1/period=5). `settleMarket()`'s demo flow never collided (fresh random authority per call),
+  but a single connected WALLET is the SAME authority across every catalog entry it bets on — so two
+  different catalog markets could silently resolve to the same on-chain account. Fixed with
+  `marketMatchesCatalogEntry()`: `walletMarketStatus()` now only reports `exists:true` when the
+  on-chain predicate actually matches the requested catalog entry (so "Your tickets" never shows a
+  phantom ticket for an entry you never bet on), and `buildDepositTransaction()` throws a clear error
+  instead of silently depositing into a mismatched market. Deliberately NOT fixed by changing the
+  on-chain PDA seeds (would need a program rebuild + full re-verification across localnet AND devnet
+  this late in the session) — a defensive product-layer guard is the safer call given the time budget;
+  documented here rather than silently working around it.
+  Verified end-to-end (Playwright, mocked-Phantom-bridged-to-a-real-Node-signer, same pattern as
+  Phase 3.2): connect → fund → submit "England to score" → fast-forward to full time → "Your tickets"
+  shows exactly that one market (collision guard confirmed working) → Resolve (permissionless,
+  confirmed real tx) → Claim (real wallet-signed tx) → topbar balance updates, panel shows "resolved
+  YES · vault 100.00 USDC · claimed" with a working explorer link, toast confirmation. 0 console errors.
+  Also verified the demo step-by-step timeline separately (12× fast-forward → Settle full-time markets
+  → expand → all 5 steps with distinct real tx links visible). **PASS**
 
 _Design note: a connected wallet's ticket creates its OWN market instance, not the one
 `settleMarket()`'s "Settle full-time markets" button uses. Both are real, honest, on-chain — they're
 just two different (by design) market PDAs for the same catalog entry, since `create_market`'s PDA is
 seeded by `authority`, and the demo-settle flow deliberately uses a fresh throwaway authority per run
-so repeated demo settles never collide. P3.4 will extend the settle path to ALSO resolve/claim a
-connected wallet's own market, closing the loop end-to-end._
+so repeated demo settles never collide. P3.4 closes the loop: the wallet's own market now gets
+resolved + claimed too, so a real wallet balance visibly moves, not just the demo mechanics._
 
 **Phase 4 — replay chart overhaul** — **DONE, all green** (built on a concurrent sub-agent worktree,
 merged in and independently re-verified: tests + typecheck re-run clean post-merge)
@@ -311,4 +341,7 @@ _Evidence (apps/keeper/src/engine.ts, apps/keeper/test/engine.test.ts, apps/web/
 - [ ] P5.3 final `BLOCKED.md` pass, honest and matching existing rigor
 
 ## PASS/PENDING table (Night 2)
-_Phase 0, 1, 2 done (see evidence above). Phase 3: P3.1-P3.3 done; P3.4 deliberately deferred until after the Phase 4 merge (both touch `ReplayTheater.tsx`'s settlement panel) — now merged, P3.4 continues next. Phase 4 done (see evidence above, merged from a concurrent sub-agent's worktree and independently re-verified — tests + typecheck re-run clean post-merge). Phase 5 not yet started._
+_Phases 0, 1, 2, 3, 4 all DONE (see evidence above). Full regression re-run clean after every merge:
+pricing 15/15, onchain escrow 15/15, keeper engine unit tests 34/34, both apps typecheck clean (pre-
+existing bn.js + server.ts `unknown` errors only — not introduced this session). Phase 5 (demo script +
+docs) is what's left._

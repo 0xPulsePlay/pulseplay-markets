@@ -60,11 +60,13 @@ export interface ProofReceipt {
   settleTx: string | null; escrowProgram: string; oracleProgram: string;
 }
 
+export interface SettleStep { label: string; description: string; tx: string }
 export interface SettleResult {
   marketId: string; outcome: boolean; winningSide: "YES" | "NO";
   potBaseUnits: string; mint: string; mintDecimals: number; mintLabel: string;
   market: string; vault: string;
   txids: { create: string; depositYes: string; depositNo: string; resolve: string; claim: string };
+  steps: SettleStep[]; liveProof: boolean;
   settledAt: number; proofFile: string; generation: "V1" | "V2" | "V3";
 }
 
@@ -91,6 +93,10 @@ export interface WalletMarketInfo { market: string; vault: string; position: str
 export interface FaucetResult { wallet: string; mint: string; mintedBaseUnits: string; solTxSig: string | null; ata: string }
 export interface BuildDepositResult { transactionBase64: string; market: string; vault: string; position: string; createdMarket: boolean }
 export interface BuildClaimResult { transactionBase64: string; market: string; vault: string }
+export interface ResolveWalletMarketResult {
+  outcome: boolean; winningSide: "YES" | "NO"; resolveTx: string; market: string; vault: string;
+  vaultBaseUnits: string; mintDecimals: number; mintLabel: string; live: boolean;
+}
 
 export const api = {
   health: () => get<Health>("/api/health"),
@@ -108,4 +114,6 @@ export const api = {
   buildDeposit: (wallet: string, marketId: string, side: boolean, amountWhole: number) =>
     post<BuildDepositResult>("/api/tickets/build-deposit", { wallet, marketId, side, amountWhole }),
   buildClaim: (wallet: string, marketId: string) => post<BuildClaimResult>("/api/tickets/build-claim", { wallet, marketId }),
+  resolveWalletMarket: (wallet: string, marketId: string) =>
+    post<ResolveWalletMarketResult>(`/api/wallet/${wallet}/market/${marketId}/resolve`),
 };
