@@ -53,6 +53,13 @@ export interface Market {
    *  devnet API (`?statKeys=1,2,3`) instead of only ever using the recorded (mainnet-clone-bound)
    *  fixture — see docs/TXLINE-INTEGRATION.md "Devnet". Absent for V1 (single statKey suffices). */
   liveStatKeys?: number[];
+  /** Night 3 Phase C: when this market's fair price is derived from the SAME underlying TxLINE series
+   *  `buildReplay()` already plots (engine.ts's `seriesDefs[].id` — a generic id like
+   *  "ou-goals-over-0.5"/"1x2-away", stable across any fixture, not team-name-specific), the web app can
+   *  drive this market's displayed YES/NO odds live as the replay scrubs, instead of a static snapshot
+   *  fetched once at catalog load. Absent for markets priced from a source the replay doesn't plot
+   *  (modeled priors) — those stay honestly static, never a fabricated "live" number. */
+  liveSeriesId?: string;
 }
 
 const oddsCache = new Map<string, any>();
@@ -80,6 +87,7 @@ interface Def {
   fixtureProofFile: string; expectedOutcome: boolean; margin: number; settlementNote: string;
   pricingSource: PricingSource;
   price: () => Promise<number>;
+  liveSeriesId?: string;
 }
 
 const B = 300; // LMSR liquidity subsidy per market (spec guidance)
@@ -108,6 +116,9 @@ export async function buildCatalog(fixtureId: number = CONFIG.demoFixtureId): Pr
         ? `V1 validate_stat: ${home} scored 1 (>0) → YES, program-attested.`
         : `Settles via a V1 validate_stat CPI once a proof is recorded for this fixture — priced here, not yet settleable in this demo.`,
       price: async () => (await fairPct(fixtureId, "OVERUNDER_PARTICIPANT_GOALS", "over", "line=0.5")) ?? 76,
+      // engine.ts's buildReplay() plots this exact line (over/line=0.5) as seriesDefs id "ou-goals-over-0.5"
+      // — the web app drives this market's YES/NO odds live off the same replay keyframes.
+      liveSeriesId: "ou-goals-over-0.5",
     },
     {
       id: "arg-2plus", title: `${away} 2+ goals`, subtitle: "Away goals in the match",
@@ -117,6 +128,9 @@ export async function buildCatalog(fixtureId: number = CONFIG.demoFixtureId): Pr
         ? `V1 validate_stat: ${away} scored 2 (>1) → YES. (De-margined price uses the 1X2 ${away}-win line.)`
         : `Settles via a V1 validate_stat CPI once a proof is recorded for this fixture — priced here, not yet settleable in this demo.`,
       price: async () => (await fairPct(fixtureId, "1X2_PARTICIPANT_RESULT", "part2")) ?? 33,
+      // Same underlying series as engine.ts's "1x2-away" (the away-team win line) — generic id, stable
+      // across any fixture (not team-name-specific).
+      liveSeriesId: "1x2-away",
     },
     {
       id: "eng-exact-1", title: `${home} exactly 1 goal`, subtitle: "Exact home tally",
@@ -187,7 +201,7 @@ async function materialize(d: Def, settleable: boolean): Promise<Market> {
     fairYesOdds: fairDecimalOdds(fair), bookYesOdds: bookDecimalOdds(fair, d.margin),
     marginTaxPct: (1 - 1 / (1 + d.margin)) * 100,
     lmsr: { b: B, openPrices: lmsr.prices(), maxLossBinary: LMSR.maxLoss(B, 2), outcomes: ["YES", "NO"] },
-    settlementNote: d.settlementNote,
+    settlementNote: d.settlementNote, liveSeriesId: d.liveSeriesId,
   };
 }
 

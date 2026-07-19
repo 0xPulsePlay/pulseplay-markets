@@ -21,6 +21,9 @@ export interface Market {
   pricingSource: "de-margined" | "modeled"; fairYesPct: number; fairNoPct: number; bookYesPct: number;
   fairYesOdds: number; bookYesOdds: number; marginTaxPct: number; legs?: Leg[];
   lmsr?: { b: number; openPrices: number[]; maxLossBinary: number; outcomes: string[] }; settlementNote: string;
+  /** Night 3 Phase C: when set, this market's YES/NO odds can be driven live off the matching
+   *  ReplayData.seriesDefs id as the replay scrubs, instead of the static snapshot below. */
+  liveSeriesId?: string;
 }
 export interface Catalog { fixtureId: number; categories: { outcomes: Market[]; combos: Market[]; batch: Market[] }; }
 

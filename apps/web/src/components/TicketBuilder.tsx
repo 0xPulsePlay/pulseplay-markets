@@ -139,9 +139,9 @@ export function TicketBuilder({ ticket, removeLeg, onOpenReplay }: {
         </div>
         <p className="tiny muted" style={{ lineHeight: 1.5 }}>
           Every ticket resolves against TxLINE data anchored on Solana — one oracle CPI, no dispute window.
-          Watch it settle on the semifinal replay.
+          Watch it settle on the semifinal replay above.
         </p>
-        <button className="btn primary block" style={{ marginTop: "var(--pp-space-3)" }} onClick={onOpenReplay}>Open the replay</button>
+        <button className="btn primary block" style={{ marginTop: "var(--pp-space-3)" }} onClick={onOpenReplay}>Jump to the replay ↑</button>
       </div>
     </aside>
   );

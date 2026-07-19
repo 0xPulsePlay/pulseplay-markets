@@ -1,13 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { api, type Health, type SegmentedFixtures, type Catalog, type Market, type ProofReceipt, type SettleResult } from "./api";
-import { Storefront } from "./views/Storefront";
-import { ReplayTheater } from "./views/ReplayTheater";
+import { MatchWorkspace } from "./views/MatchWorkspace";
 import { ProofReceiptView } from "./views/ProofReceiptView";
 import { IconShield, IconBolt } from "./components/icons";
 import { WalletProvider } from "./wallet/WalletContext";
 import { WalletWidget } from "./wallet/WalletWidget";
 
-export type View = "store" | "replay" | "receipt";
+// Night 3 Phase C: "store" and "replay" merged into one "match" view — the replay now plays inline on
+// the same page as the markets/ticket builder, not a separate destination (see MatchWorkspace.tsx).
+export type View = "match" | "receipt";
 export interface TicketLeg { market: Market; side: boolean; }
 export interface Settled { result: SettleResult; receipt: ProofReceipt; }
 
@@ -17,7 +18,7 @@ export function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [selectedFixtureId, setSelectedFixtureId] = useState<number | null>(null);
-  const [view, setView] = useState<View>("store");
+  const [view, setView] = useState<View>("match");
   const [ticket, setTicket] = useState<TicketLeg[]>([]);
   const [settlements, setSettlements] = useState<Record<string, Settled>>({});
   const [activeReceipt, setActiveReceipt] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export function App() {
 
   const selectFixture = useCallback((fixtureId: number, label?: string) => {
     setSelectedFixtureId(fixtureId);
-    setView("store");
+    setView("match");
     flash(label ? `Now browsing ${label}` : "Fixture selected");
   }, [flash]);
 
@@ -68,8 +69,7 @@ export function App() {
         <header className="topbar">
           <img className="logo" src="/logos/lockup-horizontal-on-dark.svg" alt="PulsePlay" />
           <nav>
-            <button className={`navlink ${view === "store" ? "active" : ""}`} onClick={() => setView("store")}>Markets</button>
-            <button className={`navlink ${view === "replay" ? "active" : ""}`} onClick={() => setView("replay")}>Replay</button>
+            <button className={`navlink ${view === "match" ? "active" : ""}`} onClick={() => setView("match")}>Markets</button>
             <button className={`navlink ${view === "receipt" ? "active" : ""}`} onClick={() => setView("receipt")} disabled={!activeReceipt && Object.keys(settlements).length === 0}>Proof</button>
           </nav>
           <span className="spacer" />
@@ -80,17 +80,11 @@ export function App() {
         </header>
 
         <main className="page">
-          {view === "store" && (
-            <Storefront
+          {view === "match" && (
+            <MatchWorkspace
               health={health} fixtures={fixtures} catalog={catalog} catalogLoading={catalogLoading}
               selectedFixtureId={selectedFixtureId} onSelectFixture={selectFixture}
               ticket={ticket} addLeg={addLeg} removeLeg={removeLeg}
-              onOpenReplay={() => setView("replay")}
-            />
-          )}
-          {view === "replay" && (
-            <ReplayTheater
-              catalog={catalog} health={health}
               settlements={settlements} recordSettlement={recordSettlement}
               onOpenReceipt={openReceipt} flash={flash}
             />
@@ -98,7 +92,7 @@ export function App() {
           {view === "receipt" && (
             <ProofReceiptView
               catalog={catalog} settlements={settlements} activeReceipt={activeReceipt}
-              setActiveReceipt={setActiveReceipt} onBack={() => setView("replay")}
+              setActiveReceipt={setActiveReceipt} onBack={() => setView("match")}
             />
           )}
         </main>

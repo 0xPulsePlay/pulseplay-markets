@@ -5,8 +5,8 @@ import { IconChevron, IconLayers, IconTarget } from "./icons";
 const odds = (o: number) => o.toFixed(2);
 const pct = (p: number) => `${p.toFixed(1)}%`;
 
-export function MarketCard({ market, selectedSide, onPick }: {
-  market: Market; selectedSide?: boolean; onPick: (side: boolean) => void;
+export function MarketCard({ market, selectedSide, onPick, live }: {
+  market: Market; selectedSide?: boolean; onPick: (side: boolean) => void; live?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isTicket = market.category !== "outcomes";
@@ -28,6 +28,7 @@ export function MarketCard({ market, selectedSide, onPick }: {
           {market.pricingSource === "de-margined" ? "de-margined price" : "modeled prior"}
         </span>
         <span className="pill">{market.predicateLabel}</span>
+        {live && <span className="pill live-pill" title="This price updates live as the replay plays"><span className="dot live-dot" /> live</span>}
       </div>
 
       {!isTicket ? (

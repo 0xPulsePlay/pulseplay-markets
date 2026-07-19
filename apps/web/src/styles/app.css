@@ -64,6 +64,11 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .page { flex: 1; max-width: 1240px; width: 100%; margin: 0 auto; padding: var(--pp-space-5); }
 .grid-main { display: grid; grid-template-columns: 1fr; gap: var(--pp-space-5); }
 @media (min-width: 960px) { .grid-main { grid-template-columns: 1fr 360px; align-items: start; } }
+/* CSS Grid items default to min-width:auto (sized to their content's intrinsic min-content width), so
+   any child with its own horizontal scroller (e.g. .fixture-scroll) can blow the WHOLE grid track wider
+   than the viewport instead of scrolling internally. min-width:0 lets the track — and everything inside
+   it — respect the grid's actual column width instead. */
+.grid-main > * { min-width: 0; }
 
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: var(--pp-space-6) 0 var(--pp-space-3); }
 .section-head h2 { font-family: var(--pp-font-display); font-weight: 700; font-size: var(--pp-text-lg); letter-spacing: var(--pp-tracking-display); }
@@ -157,7 +162,12 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .stat-row .v.yes { color: var(--pp-color-yes); }
 
 /* ============ replay theater ============ */
-.theater { display: grid; gap: var(--pp-space-4); }
+.theater { display: grid; gap: var(--pp-space-4); min-width: 0; }
+/* Same min-width:auto blowout as .grid-main, one level deeper: .theater is itself a grid container, so
+   ITS children (e.g. the fixture picker's horizontal-scroll strip) default to min-width:auto too and can
+   size the theater's implicit column off their raw content width instead of respecting the column
+   .theater was already constrained to above. */
+.theater > * { min-width: 0; }
 .scoreboard { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--pp-space-4); padding: var(--pp-space-5); }
 .scoreboard .sb-team { display: flex; align-items: center; gap: var(--pp-space-3); }
 .scoreboard .sb-team.away { justify-content: flex-end; }
@@ -214,6 +224,26 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .cat-tabs { display: flex; gap: var(--pp-space-2); flex-wrap: wrap; margin-bottom: var(--pp-space-3); }
 .cat-tab { padding: 8px 14px; border-radius: var(--pp-radius-control); border: 1px solid var(--pp-color-border); font-weight: 600; font-size: var(--pp-text-sm); color: var(--pp-color-text-muted); }
 .cat-tab.active { border-color: var(--pp-color-brand); color: var(--pp-color-text); }
+.cat-tab:disabled { opacity: 0.4; cursor: default; }
+.cat-tab .dot.live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--pp-color-live); margin-right: 5px; animation: pulse-dot 1.6s ease-in-out infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ============ fixture picker (Night 3 Phase E — moved from the bottom of the page to the top) ============ */
+.fixture-picker { margin-bottom: var(--pp-space-5); }
+.fixture-scroll { display: flex; gap: var(--pp-space-3); overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; min-width: 0; }
+.fixture-pill {
+  flex: 0 0 auto; width: 168px; text-align: left; background: var(--pp-color-surface-raised);
+  border: 1px solid var(--pp-color-border); border-radius: var(--pp-radius-control); padding: var(--pp-space-3);
+  cursor: pointer; position: relative; transition: border-color var(--pp-motion-feedback) var(--pp-motion-ease), background var(--pp-motion-feedback) var(--pp-motion-ease);
+}
+.fixture-pill:hover { border-color: var(--pp-color-border-strong); }
+.fixture-pill.selected { border-color: var(--pp-color-brand); background: color-mix(in srgb, var(--pp-color-brand) 10%, var(--pp-color-surface-raised)); }
+.fp-check { position: absolute; top: 8px; right: 8px; color: var(--pp-color-brand); }
+.fp-teams { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.fp-v { font-size: var(--pp-text-2xs); color: var(--pp-color-text-faint); }
+.fp-names { font-size: var(--pp-text-xs); font-weight: 600; line-height: 1.3; margin-bottom: 8px; min-height: 2.6em; }
+.fp-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.live-pill { color: var(--pp-color-live); border-color: color-mix(in srgb, var(--pp-color-live) 45%, var(--pp-color-border)); }
 .grow { flex: 1; }
 .stack { display: grid; gap: var(--pp-space-3); }
 .tiny { font-size: var(--pp-text-2xs); }
