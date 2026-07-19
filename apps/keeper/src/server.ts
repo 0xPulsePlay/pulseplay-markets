@@ -9,6 +9,7 @@ import {
   settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements, faucetFund,
   walletBalances, walletMarketStatus, buildDepositTransaction, buildClaimTransaction, resolveWalletMarket,
 } from "./chain.js";
+import { describeError } from "./errors.js";
 
 const app = express();
 app.use(cors());
@@ -134,7 +135,7 @@ app.post("/api/wallet/:wallet/market/:marketId/resolve", wrap(async (req, res) =
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("[keeper] error:", err?.message ?? err);
-  res.status(500).json({ error: String(err?.message ?? err) });
+  res.status(500).json({ error: describeError(err) });
 });
 
 app.listen(CONFIG.port, () => {

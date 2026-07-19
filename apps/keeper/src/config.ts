@@ -16,6 +16,7 @@ type Cluster = "localnet" | "devnet";
  */
 const CLUSTER_PRESETS: Record<Cluster, {
   rpcUrl: string; oracleProgram: string; dailyScoresRootsPda: string; wagerMint: string; mintAuthorityKeypairPath: string;
+  walletKeypairPath: string;
 }> = {
   localnet: {
     rpcUrl: "http://127.0.0.1:8999",
@@ -25,6 +26,9 @@ const CLUSTER_PRESETS: Record<Cluster, {
     // often, so there's no stable address to hardcode; the keeper's own wallet is the mint authority).
     wagerMint: "",
     mintAuthorityKeypairPath: "",
+    // "" = falls through to the historical default (~/.config/solana/id.json) below — unchanged from
+    // before this preset existed. The local validator's own faucet funds this wallet freely.
+    walletKeypairPath: "",
   },
   devnet: {
     rpcUrl: "https://api.devnet.solana.com",
@@ -39,11 +43,22 @@ const CLUSTER_PRESETS: Record<Cluster, {
     // The mint's authority is the deploy wallet (it minted the token), NOT the keeper's normal
     // operating wallet — the faucet (and localnet's self-serve mint) need to sign as this key.
     mintAuthorityKeypairPath: "~/.config/solana/pulseplay-deploy-authority.json",
+    // devnet's generic ~/.config/solana/id.json has 0 SOL (it's the old faucet-dry wallet from before
+    // Mikail supplied a funded deploy wallet — see BLOCKED.md history). Without this preset, a plain
+    // `CLUSTER=devnet` restart (no extra env vars) would silently reintroduce that exact blocker: the
+    // keeper's own operating wallet — the fee payer/authority for settleMarket()/resolveWalletMarket()/
+    // fundGas() — would have no SOL to pay for anything. Point it at the same funded deploy wallet by
+    // default; KEEPER_WALLET_PATH still overrides if a separate operating wallet is ever funded later.
+    walletKeypairPath: "~/.config/solana/pulseplay-deploy-authority.json",
   },
 };
 
-const cluster = (process.env.CLUSTER as Cluster | undefined) ?? "localnet";
-const preset = CLUSTER_PRESETS[cluster] ?? CLUSTER_PRESETS.localnet;
+// devnet is the real, demo-ready default (Night 3: Mikail's build must default to devnet on a plain
+// restart, not require 4 manually-passed env vars — see BLOCKED.md / docs/BUILD-STATUS.md "Night 3").
+// `CLUSTER=localnet` is kept as an explicit override for fast local iteration (no devnet SOL/rate-limit
+// concerns) — see docs/BUILD-STATUS.md for the localnet dev-loop instructions.
+const cluster = (process.env.CLUSTER as Cluster | undefined) ?? "devnet";
+const preset = CLUSTER_PRESETS[cluster] ?? CLUSTER_PRESETS.devnet;
 
 /** Central config. Ports per the night-shift operating contract: keeper/API on 4190.
  *  Every chain-facing value is env-driven with a cluster-aware default — `CLUSTER=devnet` switches
@@ -56,8 +71,9 @@ export const CONFIG = {
   programId: process.env.PROGRAM_ID ?? "2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin",
   oracleProgram: process.env.ORACLE_PROGRAM ?? preset.oracleProgram,
   dailyScoresRootsPda: process.env.DAILY_SCORES_ROOTS_PDA ?? preset.dailyScoresRootsPda,
-  // Preserves the exact prior hardcoded default (~/.config/solana/id.json) when unset.
-  walletKeypairPath: expandHome(process.env.KEEPER_WALLET_PATH ?? "~/.config/solana/id.json"),
+  // localnet: preserves the exact prior hardcoded default (~/.config/solana/id.json). devnet: the
+  // funded deploy wallet (see CLUSTER_PRESETS note above — id.json has 0 devnet SOL).
+  walletKeypairPath: expandHome(process.env.KEEPER_WALLET_PATH || preset.walletKeypairPath || "~/.config/solana/id.json"),
   // Devnet-only: where get-devnet-token.mjs cached the subscribe->activate apiToken/JWT.
   devnetTokenCachePath: process.env.DEVNET_TOKEN_CACHE ?? new URL("../.cache/devnet-token.json", import.meta.url).pathname,
   devnetTxlineApiBase: process.env.DEVNET_TXLINE_API_BASE ?? "https://txline-dev.txodds.com",
