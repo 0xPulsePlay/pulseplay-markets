@@ -3,24 +3,31 @@
 Honest log of what is parked and why, with what was tried. None of these block the core deliverable
 (V1 + V3 settlement e2e on localnet with tests + storefront + proof receipt), which is green.
 
-## 1. Devnet deploy — faucet dry (P2.8)
-**State:** localnet-only. The deploy wallet `6SAXkSaEKGyptFCqc44qna83zMow3h7EHVJ1VbKxHQu6` has **0 devnet
-SOL**; `solana airdrop 1 … --url devnet` fails with "airdrop request failed / rate limit reached" (tried
-repeatedly). The engine brief mentioned a 5-SOL deploy authority, but the default keypair on this machine
-is empty on devnet.
-**Impact:** none on the proof of record. Per the engine brief (§8.4), the **local-validator suite against
-the REAL cloned oracle IS the settlement proof of record**; a devnet deploy would only add a `create_market`
-smoke tx (a live devnet *resolve* is separately blocked — see below).
-**To unblock:** fund `6SAX…` with ~4 devnet SOL (https://faucet.solana.com), then:
-```
-cd onchain && anchor build -- --features devnet   # pins the devnet oracle 6pW64gN…
-solana program deploy target/deploy/pulseplay_escrow.so \
-  --program-id target/deploy/pulseplay_escrow-keypair.json --url https://api.devnet.solana.com
-```
-**Second gate (documented fast-follow):** a live devnet *resolve* also needs a devnet `X-Api-Token` —
-devnet scores stat-validation returns `403 "Missing API token"` (engine brief §4). Guest JWT covers
-odds/fixtures but not scores proofs on devnet. This is why the reference escrow-demo also stopped at a
-devnet `create_market` smoke and kept the local-validator suite as the record.
+## 1. Devnet deploy + live resolve — RESOLVED (Night 2, 2026-07-19)
+**Was blocked:** the deploy wallet used last night (`6SAXkSaEKGyptFCqc44qna83zMow3h7EHVJ1VbKxHQu6`) had
+0 devnet SOL and the public faucet was rate-limited dry. A live devnet *resolve* was additionally
+expected to need a devnet `X-Api-Token` that scores stat-validation would reject with 403.
+**Resolved:** Mikail supplied a funded deploy wallet
+(`5nBA87pXc63mM2i2uFfyMKa3uwRagg499xecGhpKjCyJ`, ~8.4 devnet SOL). `pulseplay_escrow` is deployed to
+devnet at the same stable program id (`2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin`), authority = the
+deploy wallet. The devnet `X-Api-Token` gate is also resolved:
+`apps/keeper/scripts/get-devnet-token.mjs` replicates the subscribe→activate flow against the DEVNET
+TxLINE program (`6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`, devnet mint
+`4Zao8ocPhmMgq7PdsYWyxvqySMGx7xb9cMftPMkEokRG`, `serviceLevelId=1` — NOT the mainnet mint/id=12 the
+reference script defaults to; both had to be cross-checked against a read-only doc in the sibling
+`txline-explorer` repo before spending anything) — dry-run clean, real run confirmed (0-cost free tier).
+**Bonus, not just unblocked but a genuine live-settlement win:** the local engine at `localhost:3001`
+only proxies MAINNET TxLINE, so devnet proof-fetching calls `https://txline-dev.txodds.com` directly
+(raw upstream REST, different shape than the aggregated `/v1/*` surface — see
+`docs/TXLINE-INTEGRATION.md` "Devnet"). Doing that turned up that the demo semifinal fixture
+(`18241006`, England 1–2 Argentina) is ALSO live on devnet with matching score data. A full live
+`resolve_outcome` — fetch a real proof from `txline-dev.txodds.com` at settle time, CPI the live devnet
+oracle, claim — works end-to-end (`apps/keeper/scripts/verify-devnet-live-resolve.mjs`, 8/8 checks) and
+is now wired into the actual keeper (`chain.ts`'s `settleMarket()` tries a live devnet proof for V1
+before falling back to the recorded fixture). **Residual, not fully closed:** V2/V3 live devnet proofs
+are unconfirmed (the local `/v1` surface doesn't serve V3 multiproofs even for mainnet, and the raw
+devnet `/api/scores/stat-validation` multi-stat shape wasn't tested this session) — Combos/Batch stay
+on recorded fixtures on devnet too, same as localnet. Not a regression, just not yet extended.
 
 ## 2. V2 (`validate_stat_v2`) — RESOLVED (was: no crate helper)
 **Was blocked:** the vendored `txoracle-cpi` Rust crate ships `cpi_validate_stat` (V1) +

@@ -13,12 +13,20 @@
 //! (predicate holds). Occurrence markets settle BOTH sides cryptographically via the sentinel-zero
 //! trick: value 0 is a provable non-membership statement ("no red card" = key==0 EqualTo).
 //!
-//! Escrow is in native SOL (stand-in for USDC on devnet). SAFETY: local validator + devnet only.
+//! Escrow custody is a classic-SPL-Token vault: each market's vault is an Associated Token Account
+//! (ATA) owned by the market PDA itself (no separate vault PDA/bump — the market signs for its own
+//! vault). `deposit`/`claim`/`refund` move the market's fixed `mint` (devnet: a test "USDC" token —
+//! see docs/BUILD-STATUS.md Phase 1; mainnet-hackathon-rules-compliant: escrow is USDC/SOL/other,
+//! never the TxL credit token). A market is bound to its mint at `create_market` time and every
+//! later instruction re-checks the passed `mint` account against it (`WrongMint` on mismatch) so a
+//! bogus mint can never redirect state updates away from the market's real vault. SAFETY: local
+//! validator + devnet only — this mint is a devnet test token, not real USDC.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::{get_return_data, invoke};
-use anchor_lang::system_program::{transfer, Transfer};
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::{transfer, Mint, Token, TokenAccount, Transfer};
 use txoracle_cpi::{
     cpi_validate_stat, cpi_validate_stat_v3, strategy_trailer, BinaryExpression, Comparison,
     DiscretePredicate, FixtureSummary, Multiproof, Predicate, ProofNode, StatEntry, StatTerm,
@@ -125,11 +133,12 @@ pub mod pulseplay_escrow {
         m.total_yes = 0;
         m.total_no = 0;
         m.bump = ctx.bumps.market;
-        m.vault_bump = ctx.bumps.vault;
+        m.mint = ctx.accounts.mint.key();
         Ok(())
     }
 
-    /// Stake `amount` lamports on a side (true = Yes / predicate holds). Closes at `cutoff_ts`.
+    /// Stake `amount` base units of the market's mint on a side (true = Yes / predicate holds).
+    /// Closes at `cutoff_ts`.
     pub fn deposit(ctx: Context<Deposit>, side: bool, amount: u64) -> Result<()> {
         let m = &mut ctx.accounts.market;
         require!(!m.resolved, EscrowError::AlreadyResolved);
@@ -139,10 +148,11 @@ pub mod pulseplay_escrow {
 
         transfer(
             CpiContext::new(
-                ctx.accounts.system_program.key(),
+                ctx.accounts.token_program.key(),
                 Transfer {
-                    from: ctx.accounts.depositor.to_account_info(),
+                    from: ctx.accounts.depositor_token_account.to_account_info(),
                     to: ctx.accounts.vault.to_account_info(),
+                    authority: ctx.accounts.depositor.to_account_info(),
                 },
             ),
             amount,
@@ -315,21 +325,26 @@ pub mod pulseplay_escrow {
             .and_then(|x| x.checked_div(winning_total as u128))
             .ok_or(EscrowError::Overflow)? as u64;
 
-        let market_key = m.key();
-        let vault_seeds: &[&[u8]] = &[b"vault", market_key.as_ref(), &[m.vault_bump]];
+        // The vault's authority is the MARKET pda itself (no separate vault pda) — sign with the
+        // market's own seeds, matching how `create_market` derived it.
+        let market_seeds: &[&[u8]] = &[
+            b"market", m.authority.as_ref(), &m.fixture_id.to_le_bytes(),
+            &m.stat_key.to_le_bytes(), &m.period.to_le_bytes(), &[m.bump],
+        ];
         transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.system_program.key(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.vault.to_account_info(),
-                    to: ctx.accounts.owner.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: ctx.accounts.market.to_account_info(),
                 },
-                &[vault_seeds],
+                &[market_seeds],
             ),
             payout,
         )?;
         pos.claimed = true;
-        emit!(Claimed { market: market_key, owner: pos.owner, payout });
+        emit!(Claimed { market: m.key(), owner: pos.owner, payout });
         Ok(())
     }
 
@@ -357,21 +372,24 @@ pub mod pulseplay_escrow {
         require!(!pos.claimed, EscrowError::AlreadyClaimed);
         let amount = pos.amount;
 
-        let market_key = m.key();
-        let vault_seeds: &[&[u8]] = &[b"vault", market_key.as_ref(), &[m.vault_bump]];
+        let market_seeds: &[&[u8]] = &[
+            b"market", m.authority.as_ref(), &m.fixture_id.to_le_bytes(),
+            &m.stat_key.to_le_bytes(), &m.period.to_le_bytes(), &[m.bump],
+        ];
         transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.system_program.key(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.vault.to_account_info(),
-                    to: ctx.accounts.owner.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: ctx.accounts.market.to_account_info(),
                 },
-                &[vault_seeds],
+                &[market_seeds],
             ),
             amount,
         )?;
         pos.claimed = true;
-        emit!(Claimed { market: market_key, owner: pos.owner, payout: amount });
+        emit!(Claimed { market: m.key(), owner: pos.owner, payout: amount });
         Ok(())
     }
 }
@@ -414,17 +432,18 @@ pub struct Market {
     pub total_yes: u64,
     pub total_no: u64,
     pub bump: u8,
-    pub vault_bump: u8,
     /// 0 = single-stat / full-coverage; 1/2 = derived (Add/Subtract) market settled via resolve_ticket.
     pub combine_op: u8,
     /// Product category: 0 = Outcome, 1 = Combo, 2 = Batch.
     pub market_kind: u8,
+    /// The SPL mint this market's vault/deposits/payouts are denominated in (fixed at creation).
+    pub mint: Pubkey,
 }
 impl Market {
     // discriminator(8) + authority(32) + fixture_id(8) + stat_key(4) + period(4) + threshold(4)
     // + comparison(1) + cutoff_ts(8) + resolve_deadline(8) + resolved(1) + cancelled(1) + outcome(1)
-    // + total_yes(8) + total_no(8) + bump(1) + vault_bump(1) + combine_op(1) + market_kind(1)
-    pub const SPACE: usize = 8 + 32 + 8 + 4 + 4 + 4 + 1 + 8 + 8 + 1 + 1 + 1 + 8 + 8 + 1 + 1 + 1 + 1;
+    // + total_yes(8) + total_no(8) + bump(1) + combine_op(1) + market_kind(1) + mint(32)
+    pub const SPACE: usize = 8 + 32 + 8 + 4 + 4 + 4 + 1 + 8 + 8 + 1 + 1 + 1 + 8 + 8 + 1 + 1 + 1 + 32;
 
     fn comparison_enum(&self) -> Comparison {
         match self.comparison {
@@ -461,9 +480,21 @@ pub struct CreateMarket<'info> {
         bump
     )]
     pub market: Account<'info, Market>,
-    /// CHECK: SOL vault PDA (system-owned, no data). Signed for via seeds on payout.
-    #[account(seeds = [b"vault", market.key().as_ref()], bump)]
-    pub vault: UncheckedAccount<'info>,
+    /// The wagering token for this market (devnet: a test "USDC" mint — see docs/BUILD-STATUS.md).
+    /// Recorded on `market.mint`; every later instruction re-checks against it.
+    pub mint: Account<'info, Mint>,
+    /// The market's vault: an Associated Token Account owned by the MARKET PDA itself (no separate
+    /// vault PDA/bump needed — the market signs its own payouts). `associated_token::*` constraints
+    /// can't be combined with `seeds =`, so this is the whole address derivation.
+    #[account(
+        init,
+        payer = authority,
+        associated_token::mint = mint,
+        associated_token::authority = market,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -474,9 +505,21 @@ pub struct Deposit<'info> {
     pub depositor: Signer<'info>,
     #[account(mut)]
     pub market: Account<'info, Market>,
-    /// CHECK: SOL vault PDA for this market.
-    #[account(mut, seeds = [b"vault", market.key().as_ref()], bump = market.vault_bump)]
-    pub vault: UncheckedAccount<'info>,
+    /// Must be the market's OWN mint (checked, not just structurally derived) — else a caller could
+    /// point `vault`/`depositor_token_account` at a same-shaped ATA pair for a DIFFERENT mint and get
+    /// `total_yes`/`total_no` incremented without the real vault ever receiving anything.
+    #[account(address = market.mint @ EscrowError::WrongMint)]
+    pub mint: Account<'info, Mint>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = market)]
+    pub vault: Account<'info, TokenAccount>,
+    /// The depositor's own token account for this mint (auto-created on first deposit).
+    #[account(
+        init_if_needed,
+        payer = depositor,
+        associated_token::mint = mint,
+        associated_token::authority = depositor,
+    )]
+    pub depositor_token_account: Account<'info, TokenAccount>,
     #[account(
         init_if_needed,
         payer = depositor,
@@ -485,6 +528,8 @@ pub struct Deposit<'info> {
         bump
     )]
     pub position: Account<'info, Position>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -505,9 +550,13 @@ pub struct Claim<'info> {
     pub owner: Signer<'info>,
     #[account(mut)]
     pub market: Account<'info, Market>,
-    /// CHECK: SOL vault PDA for this market.
-    #[account(mut, seeds = [b"vault", market.key().as_ref()], bump = market.vault_bump)]
-    pub vault: UncheckedAccount<'info>,
+    #[account(address = market.mint @ EscrowError::WrongMint)]
+    pub mint: Account<'info, Mint>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = market)]
+    pub vault: Account<'info, TokenAccount>,
+    /// The claimant/refundee's own token account — already exists (they had to have one to deposit).
+    #[account(mut, associated_token::mint = mint, associated_token::authority = owner)]
+    pub owner_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
         seeds = [b"position", market.key().as_ref(), owner.key().as_ref(), &[position.side as u8]],
@@ -516,6 +565,7 @@ pub struct Claim<'info> {
         has_one = market,
     )]
     pub position: Account<'info, Position>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
@@ -569,6 +619,8 @@ pub enum EscrowError {
     StatMismatch,
     #[msg("wrong oracle program")]
     WrongOracle,
+    #[msg("mint does not match this market's wagering token")]
+    WrongMint,
     #[msg("position already claimed")]
     AlreadyClaimed,
     #[msg("position is not on the winning side")]

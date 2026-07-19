@@ -5,7 +5,7 @@ import { compareParlay, type ParlayLeg } from "@pulseplay/pricing";
 import { CONFIG } from "./config.js";
 import { segmentedFixtures, fixtureCard, buildReplay } from "./engine.js";
 import { buildCatalog, type Market } from "./catalog.js";
-import { settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements } from "./chain.js";
+import { settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements, faucetFund } from "./chain.js";
 
 const app = express();
 app.use(cors());
@@ -60,6 +60,17 @@ app.get("/api/receipt/:marketId", wrap(async (req, res) => {
 }));
 
 app.get("/api/settlements", wrap(async (_req, res) => res.json({ settlements: allSettlements() })));
+
+// "Fund my wallet": mint test wager-token + a little gas SOL to any wallet's ATA. No rate limit — we
+// control the mint authority. Body: { wallet: "<base58 pubkey>", tokens?: number, sol?: number }.
+app.post("/api/faucet", wrap(async (req, res) => {
+  const wallet = String(req.body?.wallet ?? "");
+  if (!wallet) return res.status(400).json({ error: "wallet (base58 pubkey) required" });
+  const tokens = Number(req.body?.tokens ?? 500);
+  const sol = Number(req.body?.sol ?? 0.25);
+  const result = await faucetFund(wallet, tokens, sol);
+  res.json(result);
+}));
 app.get("/api/settlement/:marketId", wrap(async (req, res) => {
   const s = getSettlement(req.params.marketId);
   if (!s) return res.status(404).json({ error: "not settled" });

@@ -139,15 +139,56 @@ Acceptance criteria authored up front (2026-07-19 08:5x UTC) — PASS/PENDING ta
   SOLANA_RPC_URL=https://api.devnet.solana.com` boots and `/api/health` → `chain:true, cluster:devnet,
   oracleProgram:6pW64gN1…`; localnet default re-verified unchanged (`chain:true, cluster:localnet`).  **PASS**
 
-**Phase 1 — USDC devnet wagering token (branch `nightshift/usdc-escrow`, prove on localnet first)**
-- [ ] P1.1 devnet SPL token minted (classic Token program, 6 decimals, symbol USDC, name labeled "(Devnet Test)")
-- [ ] P1.2 every UI surface showing the token labels it as a devnet test token, never bare "USDC"
-- [ ] P1.3 escrow program rewritten to SPL-token vault (ATA owned by market PDA); deposit/claim/refund use token transfer CPIs; behavior (side tracking, winner-take-all math, cancel/refund, fail-closed) unchanged
-- [ ] P1.4 all 12 existing localnet checks still pass + new token-path checks (e.g. wrong-mint rejection) — TDD, localnet first
-- [ ] P1.5 redeployed to devnet (same program id); devnet-verifiable paths (create-market/deposit/cancel/refund) proven as far as possible without live oracle proof; gaps logged in BLOCKED.md
-- [ ] P1.6 devnet faucet path (mint test USDC + gas SOL to any wallet, no rate limit)
-- [ ] P1.7 keeper updated for token-account-based vault/deposit/claim
-- [ ] P1.8 merged to main only after full suite green + docs updated honestly
+**Phase 1 — USDC devnet wagering token (branch `nightshift/usdc-escrow`, prove on localnet first)** — **DONE**
+- [x] P1.1 devnet SPL token minted: classic Token program, 6 decimals, mint `BPqAwt3dbUCQmbfeTmu8S4RPGedovb2zcd9DZ9Khd171`,
+  mint authority = deploy wallet. No on-chain Metaplex metadata (deliberately skipped to save time —
+  Phantom will show it as an unnamed SPL balance; our own UI is the source of truth for the label). **PASS**
+- [x] P1.2 `CONFIG.wagerMintLabel` = `"USDC · devnet test token"` (devnet) / `"USDC · local test token"`
+  (localnet), threaded through `SettleResult`/receipt so every surface reading it labels correctly —
+  full UI wiring happens in Phase 3 where the balances actually render. **PASS**
+- [x] P1.3 `pulseplay_escrow` rewritten: vault is an ATA owned by the MARKET pda itself (no separate
+  vault PDA/bump — simpler than the old design). `anchor-spl 1.1.2` added (matches the pinned
+  `anchor-lang 1.1.2` — this repo's Anchor is a real post-1.0 release, not the familiar 0.3x line).
+  `create_market`/`deposit`/`claim`/`refund` use `anchor_spl::token::transfer` CPIs. `Market` gains a
+  fixed `mint` field re-checked (`address = market.mint @ WrongMint`) on every later instruction.
+  Behavior identical otherwise. **PASS**
+- [x] P1.4 `onchain/tests/pulseplay-escrow.ts` rewritten for the SPL vault — all 12 prior checks pass
+  + 3 new (mint setup + 2 wrong-mint-rejection checks) = **15/15**. TDD: wrote the failing test first,
+  watched it fail for real reasons (mint-authority mix-up, then a genuine `AccountNotInitialized`
+  vs `WrongMint` ordering nuance — fixed by pre-creating the attacker's alternate-mint ATA so the
+  `WrongMint` check is what actually fires), then fixed the code until green. **PASS**
+- [x] P1.5 redeployed to devnet at the SAME stable program id. Verified in two tiers:
+  (a) `apps/keeper/scripts/verify-devnet-escrow.mjs` — create_market → deposit (real devnet USDC-test
+  token) → cancel → refund, fully on real devnet, 9/9 checks, real tx signatures.
+  (b) **`apps/keeper/scripts/verify-devnet-live-resolve.mjs` — a full LIVE settlement**: fetches a REAL
+  V1 proof straight from `txline-dev.txodds.com` for the real demo fixture (18241006) at settle time,
+  runs `resolve_outcome` as a genuine `validate_stat` CPI against the live devnet TxLINE oracle, and
+  claims — 8/8 checks, on-chain outcome matches the live proof. This was expected to be gated (see
+  BLOCKED.md history) — it is NOT. Wired into the actual product too: `chain.ts`'s `settleMarket()`
+  now tries a live devnet proof for V1 markets before falling back to the recorded fixture; verified
+  end-to-end through the real keeper HTTP API (`CLUSTER=devnet … POST /api/settle/eng-score` → 200,
+  real resolve tx, ~6s). V2/V3 stay on recorded fixtures on devnet too (not yet confirmed live). **PASS**
+- [x] P1.6 `POST /api/faucet {wallet, tokens?, sol?}` — mints test USDC to any wallet's ATA (mint
+  authority, no rate limit) + sends a little gas SOL as a direct transfer from the deploy wallet
+  (sidesteps the public devnet airdrop's hard rate limit — confirmed 429s otherwise). Verified live. **PASS**
+- [x] P1.7 keeper fully updated: `config.ts` gets a `wagerMint`/`mintAuthorityKeypairPath` cluster
+  preset; `chain.ts`'s `settleMarket()` funds demo bettors via the SPL token, builds the new
+  mint/vault/ATA account lists for every instruction, and uses a direct-transfer `fundGas()` instead
+  of the rate-limited airdrop RPC when `CLUSTER=devnet`. `SettleResult` gained `potBaseUnits`/`mint`/
+  `mintDecimals`/`mintLabel`/`vault` (replacing the SOL-only `potLamports`); the one web usage site
+  (`ProofReceiptView.tsx`) updated to match. **PASS**
+- [x] P1.8 merged — see "Branch note" below (main is checked out in the sibling worktree, so the
+  actual `main` ref merge is a step for the parent session/Mikail; this worktree's own integration
+  branch has it merged and is the state everything after Phase 1 builds on). **PASS**
+
+_Branch note: `nightshift/usdc-escrow` branched off this worktree's own branch
+(`worktree-agent-a7f8aedd349925f2f`), NOT off the repo's shared `main` — `main` is checked out in the
+sibling parent-directory worktree (`/Users/mikail/Desktop/PulsePlay/pulseplay-markets`), and git
+refuses to force-update a branch checked out in another worktree. `nightshift/usdc-escrow` was merged
+back into `worktree-agent-a7f8aedd349925f2f` once Phase 1 was fully green; merging that into the
+repo's real `main` is a one-command step from the parent checkout (`git merge
+worktree-agent-a7f8aedd349925f2f`) — not run from here to avoid touching a directory this session
+doesn't own._
 
 **Phase 2 — fixture picker / navigation**
 - [ ] P2.1 `GET /api/catalog` (+ replay) accepts `fixtureId` query param, defaults preserved

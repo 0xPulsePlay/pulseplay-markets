@@ -6,10 +6,14 @@
  */
 import anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { statLeaf, describeStatKey } from "@txline/verify";
+import {
+  createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo,
+  TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { CONFIG } from "./config.js";
 import type { Market } from "./catalog.js";
 
@@ -35,20 +39,126 @@ function dailyScoresRootsPda(): anchor.web3.PublicKey {
   return new PublicKey(CONFIG.dailyScoresRootsPda);
 }
 
+/** The `daily_scores_roots` PDA for whichever epoch day a given proof's `minTimestamp` falls on — the
+ *  seed a LIVE devnet proof needs (there is no single fixed PDA there, unlike localnet's one cloned day). */
+const dailyScoresRootsPdaFromTimestamp = (oracleProgram: anchor.web3.PublicKey, minTimestampMs: number) => {
+  const epochDay = Math.floor(minTimestampMs / 86400000);
+  const seed = Buffer.alloc(2);
+  seed.writeUInt16LE(epochDay % 65536);
+  return PublicKey.findProgramAddressSync([Buffer.from("daily_scores_roots"), seed], oracleProgram)[0];
+};
+
+/**
+ * Fetch a REAL, live V1 stat-validation proof directly from TxLINE's devnet API (NOT the local engine,
+ * which only proxies mainnet — see docs/TXLINE-INTEGRATION.md "Devnet"). Returns null (falls back to
+ * the recorded fixture) on anything but a clean match — cluster != devnet, no cached devnet token,
+ * network hiccup, or a stat shape that doesn't match what the market expects.
+ */
+async function liveDevnetProof(statKey: number, period: number): Promise<any | null> {
+  if (CONFIG.cluster !== "devnet") return null;
+  try {
+    const { apiToken, jwt } = loadJson(CONFIG.devnetTokenCachePath);
+    const url = `${CONFIG.devnetTxlineApiBase}/api/scores/stat-validation?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKey=${statKey}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken } });
+    if (!res.ok) return null;
+    const p: any = await res.json();
+    if (p?.statToProve?.key !== statKey || p?.statToProve?.period !== period) return null;
+    return p;
+  } catch {
+    return null; // devnet token not obtained yet, or the API is unreachable — recorded fixture covers us
+  }
+}
+
 const loadJson = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 const node = (n: any) => ({ hash: n.hash, isRightSibling: n.isRightSibling });
 const hex = (bytes: number[]) => "0x" + Buffer.from(bytes).toString("hex");
 
 let _program: any | null = null;
 let _conn: anchor.web3.Connection | null = null;
+let _operator: anchor.web3.Keypair | null = null;
 function program() {
   if (_program) return _program;
   const idl = loadJson(IDL_PATH);
   _conn = new Connection(CONFIG.rpcUrl, "confirmed");
-  const payer = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
-  const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(payer), { commitment: "confirmed" });
+  _operator = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
+  const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(_operator), { commitment: "confirmed" });
   _program = new anchor.Program(idl, provider);
   return _program;
+}
+
+// ── SPL wagering token (Phase 1) ─────────────────────────────────────────────────────────────────
+// devnet: CONFIG.wagerMint is the real "PulsePlay USDC (Devnet Test)" mint, authority = the deploy
+// wallet. localnet: no stable mint survives a validator --reset, so the keeper creates + caches its
+// OWN fresh test mint on first use (mint authority = the keeper's own wallet — same trust boundary as
+// everything else it does on localnet).
+let _mintAuthority: anchor.web3.Keypair | null = null;
+function mintAuthorityKeypair(): anchor.web3.Keypair {
+  if (_mintAuthority) return _mintAuthority;
+  _mintAuthority = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.mintAuthorityKeypairPath)));
+  return _mintAuthority;
+}
+
+const LOCAL_MINT_CACHE = new URL("../.cache/localnet-mint.json", import.meta.url).pathname;
+let _wagerMint: anchor.web3.PublicKey | null = null;
+async function wagerMint(): Promise<anchor.web3.PublicKey> {
+  if (_wagerMint) return _wagerMint;
+  if (CONFIG.wagerMint) {
+    _wagerMint = new PublicKey(CONFIG.wagerMint);
+    return _wagerMint;
+  }
+  // localnet self-serve mint, cached to disk so repeated `tsx watch` reloads (not validator resets)
+  // reuse the same address within a session.
+  if (existsSync(LOCAL_MINT_CACHE)) {
+    try {
+      const cached = new PublicKey(loadJson(LOCAL_MINT_CACHE).mint);
+      if (await _conn!.getAccountInfo(cached)) { _wagerMint = cached; return cached; }
+    } catch { /* stale cache (validator reset) — fall through and mint a fresh one */ }
+  }
+  const authority = mintAuthorityKeypair();
+  const mint = await createMint(_conn!, authority, authority.publicKey, null, CONFIG.wagerMintDecimals, undefined, undefined, TOKEN_PROGRAM_ID);
+  mkdirSync(dirname(LOCAL_MINT_CACHE), { recursive: true });
+  writeFileSync(LOCAL_MINT_CACHE, JSON.stringify({ mint: mint.toBase58(), createdAt: new Date().toISOString() }, null, 2));
+  _wagerMint = mint;
+  return mint;
+}
+
+/** Mint `amountBaseUnits` of the wager token to `owner`'s ATA (creating it if needed). No rate limit
+ *  — we control the mint authority. Used by settleMarket's demo bettors and the "Fund my wallet" faucet. */
+async function fundTokens(owner: anchor.web3.PublicKey, amountBaseUnits: number | bigint) {
+  const mint = await wagerMint();
+  const authority = mintAuthorityKeypair();
+  const ata = await getOrCreateAssociatedTokenAccount(_conn!, authority, mint, owner, true, "confirmed", undefined, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  await mintTo(_conn!, authority, mint, ata.address, authority, amountBaseUnits, [], undefined, TOKEN_PROGRAM_ID);
+  return ata.address;
+}
+
+export interface FaucetResult { wallet: string; mint: string; mintedBaseUnits: string; solTxSig: string | null; ata: string }
+
+/** "Fund my wallet": mint test USDC to the wallet's ATA + send a little gas SOL from a well-funded
+ *  wallet (avoids the public devnet airdrop's rate limit — we control the mint AND have devnet SOL). */
+export async function faucetFund(walletB58: string, tokenAmountWhole = 500, solAmount = 0.25): Promise<FaucetResult> {
+  program(); // ensures _conn is initialized
+  const wallet = new PublicKey(walletB58);
+  const decimals = CONFIG.wagerMintDecimals;
+  const amountBaseUnits = BigInt(tokenAmountWhole) * BigInt(10 ** decimals);
+  const ata = await fundTokens(wallet, amountBaseUnits);
+
+  let solTxSig: string | null = null;
+  const authority = mintAuthorityKeypair();
+  if (solAmount > 0 && authority.publicKey.toBase58() !== wallet.toBase58()) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await _conn!.getLatestBlockhash("confirmed");
+      const tx = new anchor.web3.Transaction({ feePayer: authority.publicKey, blockhash, lastValidBlockHeight }).add(
+        SystemProgram.transfer({ fromPubkey: authority.publicKey, toPubkey: wallet, lamports: Math.round(solAmount * LAMPORTS_PER_SOL) }),
+      );
+      solTxSig = await anchor.web3.sendAndConfirmTransaction(_conn!, tx, [authority], { commitment: "confirmed" });
+    } catch (e) {
+      // Non-fatal: the token mint (the important part — stakes need it) already succeeded. A wallet
+      // that already has gas SOL (e.g. Phantom's own devnet airdrop) doesn't need this to succeed.
+      console.warn("[keeper] faucet SOL transfer failed (token mint still succeeded):", (e as Error).message);
+    }
+  }
+  return { wallet: walletB58, mint: (await wagerMint()).toBase58(), mintedBaseUnits: amountBaseUnits.toString(), solTxSig, ata: ata.toBase58() };
 }
 
 export async function chainHealth(): Promise<{ chain: boolean; programId: string; cluster: string; slot?: number }> {
@@ -110,16 +220,33 @@ async function airdrop(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, 
   await conn.confirmTransaction(sig, "confirmed");
 }
 
+/** Localnet: the free local-validator faucet (`airdrop`, instant, no real rate limit). Devnet: a
+ *  direct SOL transfer from the keeper's own (well-funded) operating wallet — the PUBLIC devnet
+ *  airdrop RPC is rate-limited hard enough to fail outright under any real usage (confirmed last
+ *  night — see BLOCKED.md), but an ordinary transfer from a wallet we already funded has no such limit. */
+async function fundGas(conn: anchor.web3.Connection, to: anchor.web3.PublicKey, sol: number) {
+  if (CONFIG.cluster !== "devnet") return airdrop(conn, to, sol);
+  const from = _operator!;
+  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+  const tx = new anchor.web3.Transaction({ feePayer: from.publicKey, blockhash, lastValidBlockHeight })
+    .add(SystemProgram.transfer({ fromPubkey: from.publicKey, toPubkey: to, lamports: Math.round(sol * LAMPORTS_PER_SOL) }));
+  await anchor.web3.sendAndConfirmTransaction(conn, tx, [from], { commitment: "confirmed" });
+}
+
 export interface SettleResult {
   marketId: string;
   outcome: boolean;
   winningSide: "YES" | "NO";
-  potLamports: number;
+  potBaseUnits: string; // string: base units can exceed Number precision for large mints
+  mint: string;
+  mintDecimals: number;
+  mintLabel: string; // e.g. "USDC · devnet test token" — label reality everywhere
   market: string; // market PDA
+  vault: string; // the market's SPL token vault (an ATA owned by the market PDA)
   txids: { create: string; depositYes: string; depositNo: string; resolve: string; claim: string };
   settledAt: number;
   proofFile: string;
-  generation: "V1" | "V3";
+  generation: "V1" | "V2" | "V3";
 }
 
 const store = new Map<string, SettleResult>();
@@ -130,37 +257,59 @@ export const allSettlements = () => [...store.values()];
 export async function settleMarket(m: Market): Promise<SettleResult> {
   const prog = program();
   const conn = _conn!;
-  const proof = loadJson(join(FIXDIR, m.fixtureProofFile)).proof
+  const mint = await wagerMint();
+  // V1 (Outcomes) on devnet: try a LIVE proof straight from TxLINE's devnet API first — confirmed
+  // working (see docs/TXLINE-INTEGRATION.md "Devnet"). Falls back to the recorded fixture for V2/V3
+  // (not yet confirmed live) or if the live fetch fails for any reason (offline, no cached token, …).
+  const live = m.generation === "V1" ? await liveDevnetProof(m.statKey, m.period) : null;
+  const proof = live ?? (loadJson(join(FIXDIR, m.fixtureProofFile)).proof
     ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1 recorded files wrap under .proof
-    : loadJson(join(FIXDIR, m.fixtureProofFile)); // V3 files are bare
+    : loadJson(join(FIXDIR, m.fixtureProofFile))); // V3 files are bare
   const authority = Keypair.generate();
   const yesBettor = Keypair.generate();
   const noBettor = Keypair.generate();
-  await Promise.all([airdrop(conn, authority.publicKey, 3), airdrop(conn, yesBettor.publicKey, 3), airdrop(conn, noBettor.publicKey, 3)]);
+  // SOL covers rent + gas only now; stakes move in the SPL wager token.
+  await Promise.all([fundGas(conn, authority.publicKey, 0.05), fundGas(conn, yesBettor.publicKey, 0.05), fundGas(conn, noBettor.publicKey, 0.05)]);
+  const oneToken = 10 ** CONFIG.wagerMintDecimals;
+  await Promise.all([fundTokens(yesBettor.publicKey, 5 * oneToken), fundTokens(noBettor.publicKey, 5 * oneToken)]);
 
   const [market] = PublicKey.findProgramAddressSync(
     [Buffer.from("market"), authority.publicKey.toBuffer(), i64le(CONFIG.demoFixtureId), u32le(m.statKey), i32le(m.period)], prog.programId);
-  const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], prog.programId);
+  const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
   const posPda = (owner: anchor.web3.PublicKey, side: boolean) =>
     PublicKey.findProgramAddressSync([Buffer.from("position"), market.toBuffer(), owner.toBuffer(), Buffer.from([side ? 1 : 0])], prog.programId)[0];
+  const ataOf = (owner: anchor.web3.PublicKey) => getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
 
   const cutoff = new BN(Math.floor(Date.now() / 1000) + 3600);
   const deadline = new BN(Math.floor(Date.now() / 1000) + 7200);
   const create = await prog.methods
     .createMarket(new BN(CONFIG.demoFixtureId), m.statKey, m.period, m.threshold, m.comparison, cutoff, deadline, m.combineOp, m.kind)
-    .accounts({ authority: authority.publicKey, market, vault, systemProgram: SystemProgram.programId }).signers([authority]).rpc();
+    .accounts({
+      authority: authority.publicKey, market, mint, vault,
+      tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    }).signers([authority]).rpc();
 
-  const one = new BN(LAMPORTS_PER_SOL);
+  const one = new BN(oneToken);
   const depositYes = await prog.methods.deposit(true, one.muln(2))
-    .accounts({ depositor: yesBettor.publicKey, market, vault, position: posPda(yesBettor.publicKey, true), systemProgram: SystemProgram.programId }).signers([yesBettor]).rpc();
+    .accounts({
+      depositor: yesBettor.publicKey, market, mint, vault, depositorTokenAccount: ataOf(yesBettor.publicKey),
+      position: posPda(yesBettor.publicKey, true), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    }).signers([yesBettor]).rpc();
   const depositNo = await prog.methods.deposit(false, one)
-    .accounts({ depositor: noBettor.publicKey, market, vault, position: posPda(noBettor.publicKey, false), systemProgram: SystemProgram.programId }).signers([noBettor]).rpc();
+    .accounts({
+      depositor: noBettor.publicKey, market, mint, vault, depositorTokenAccount: ataOf(noBettor.publicKey),
+      position: posPda(noBettor.publicKey, false), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    }).signers([noBettor]).rpc();
 
-  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 10_000_000 })];
+  // Localnet clones ONE daily_scores_roots PDA for the recorded fixture (fixed). A live devnet proof
+  // can land on any epoch day, so its PDA must be derived from the proof's own timestamp instead.
+  const dailyPda = live ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp) : dailyScoresRootsPda();
+
+  const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
   let resolve: string;
   if (m.generation === "V1") {
     resolve = await prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
-      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else if (m.generation === "V2") {
     resolve = await prog.methods.resolveCombo(comboArgs(proof))
       .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
@@ -174,11 +323,15 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
   // winner claims the pot (if there is a winning side with stake)
   const winner = outcome ? yesBettor : noBettor;
   const claim = await prog.methods.claim()
-    .accounts({ owner: winner.publicKey, market, vault, position: posPda(winner.publicKey, outcome), systemProgram: SystemProgram.programId }).signers([winner]).rpc();
+    .accounts({
+      owner: winner.publicKey, market, mint, vault, ownerTokenAccount: ataOf(winner.publicKey),
+      position: posPda(winner.publicKey, outcome), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    }).signers([winner]).rpc();
 
   const result: SettleResult = {
-    marketId: m.id, outcome, winningSide: outcome ? "YES" : "NO", potLamports: 3 * LAMPORTS_PER_SOL,
-    market: market.toBase58(), txids: { create, depositYes, depositNo, resolve, claim },
+    marketId: m.id, outcome, winningSide: outcome ? "YES" : "NO", potBaseUnits: String(3 * oneToken),
+    mint: mint.toBase58(), mintDecimals: CONFIG.wagerMintDecimals, mintLabel: CONFIG.wagerMintLabel,
+    market: market.toBase58(), vault: vault.toBase58(), txids: { create, depositYes, depositNo, resolve, claim },
     settledAt: Date.now(), proofFile: m.fixtureProofFile, generation: m.generation,
   };
   store.set(m.id, result);

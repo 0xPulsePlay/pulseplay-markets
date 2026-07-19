@@ -14,11 +14,17 @@ type Cluster = "localnet" | "devnet";
  * "Devnet" section for how these were confirmed (read-only account probes + a live proof pulled from
  * txline-dev.txodds.com for fixture 18241006, the same fixture this whole demo is built around).
  */
-const CLUSTER_PRESETS: Record<Cluster, { rpcUrl: string; oracleProgram: string; dailyScoresRootsPda: string }> = {
+const CLUSTER_PRESETS: Record<Cluster, {
+  rpcUrl: string; oracleProgram: string; dailyScoresRootsPda: string; wagerMint: string; mintAuthorityKeypairPath: string;
+}> = {
   localnet: {
     rpcUrl: "http://127.0.0.1:8999",
     oracleProgram: "9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA",
     dailyScoresRootsPda: "6d9bJ2EtjAFj2k3CKbe2VV8qZ5BgdBnGsYjWApxHWgtE",
+    // "" = chain.ts creates + caches its OWN fresh local test-USDC mint on first use (localnet resets
+    // often, so there's no stable address to hardcode; the keeper's own wallet is the mint authority).
+    wagerMint: "",
+    mintAuthorityKeypairPath: "",
   },
   devnet: {
     rpcUrl: "https://api.devnet.solana.com",
@@ -27,6 +33,12 @@ const CLUSTER_PRESETS: Record<Cluster, { rpcUrl: string; oracleProgram: string; 
     // computes it from the proof's own timestamp via `dailyScoresRootsPdaFor()` in chain.ts. This
     // default is only a fallback for code paths that read CONFIG.dailyScoresRootsPda directly.
     dailyScoresRootsPda: "",
+    // "PulsePlay USDC (Devnet Test)" — classic SPL Token, 6 decimals, minted 2026-07-19. NEVER real
+    // USDC; every UI surface must label it "devnet test token". See docs/BUILD-STATUS.md Phase 1.
+    wagerMint: "BPqAwt3dbUCQmbfeTmu8S4RPGedovb2zcd9DZ9Khd171",
+    // The mint's authority is the deploy wallet (it minted the token), NOT the keeper's normal
+    // operating wallet — the faucet (and localnet's self-serve mint) need to sign as this key.
+    mintAuthorityKeypairPath: "~/.config/solana/pulseplay-deploy-authority.json",
   },
 };
 
@@ -49,6 +61,12 @@ export const CONFIG = {
   // Devnet-only: where get-devnet-token.mjs cached the subscribe->activate apiToken/JWT.
   devnetTokenCachePath: process.env.DEVNET_TOKEN_CACHE ?? new URL("../.cache/devnet-token.json", import.meta.url).pathname,
   devnetTxlineApiBase: process.env.DEVNET_TXLINE_API_BASE ?? "https://txline-dev.txodds.com",
+  // Phase 1: SPL wagering token. "" (localnet default) means chain.ts self-creates + caches one.
+  wagerMint: process.env.WAGER_MINT ?? preset.wagerMint,
+  wagerMintDecimals: Number(process.env.WAGER_MINT_DECIMALS ?? 6),
+  wagerMintLabel: process.env.WAGER_MINT_LABEL ?? (cluster === "devnet" ? "USDC · devnet test token" : "USDC · local test token"),
+  // Falls back to the keeper's own operating wallet when unset (localnet: same key mints + operates).
+  mintAuthorityKeypairPath: expandHome(process.env.MINT_AUTHORITY_WALLET_PATH || preset.mintAuthorityKeypairPath || process.env.KEEPER_WALLET_PATH || "~/.config/solana/id.json"),
   // The showpiece fixture: England 1–2 Argentina (semifinal replay), full tick corpus. Also live on
   // devnet under the same fixture id (confirmed — see docs/TXLINE-INTEGRATION.md).
   demoFixtureId: Number(process.env.DEMO_FIXTURE_ID ?? 18241006),
