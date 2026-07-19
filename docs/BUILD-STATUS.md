@@ -217,10 +217,39 @@ doesn't own._
   expandable plain-language note kept as-is (already good). **PASS**
 
 **Phase 3 — wallet connect + real ticket submission + visible settlement**
-- [ ] P3.1 Phantom wallet-connect (`window.phantom.solana`), `@solana/web3.js` + SPL token client deps added to web
-- [ ] P3.2 TicketBuilder gets a real terminal action: connected wallet signs+submits a client-side deposit tx into the market vault, cluster-aware, shows confirmed signature
-- [ ] P3.3 "Fund my wallet" faucet action (devnet SOL for gas + devnet USDC for stakes)
-- [ ] P3.4 settlement visualization: vault YES/NO balances, wallet balance before/after, step-by-step CPI lifecycle indicator, every signature a real explorer link
+- [x] P3.1 Phantom wallet-connect via `window.phantom.solana` (same detection pattern proven in the
+  sibling `battlefield` project tonight — read for reference only, never modified), implemented in
+  `apps/web/src/wallet/WalletContext.tsx` + `WalletWidget.tsx` (no `@solana/wallet-adapter` — one
+  wallet, kept the dependency graph light). `@solana/web3.js` + `@solana/spl-token` added to
+  `apps/web/package.json`. `/api/health` gained `rpcUrl`/`explorerCluster` so the client can build a
+  `Connection` and real explorer links without hardcoding cluster assumptions. **PASS**
+- [x] P3.2 TicketBuilder's "Submit ticket" button is real: for each leg, the KEEPER builds (but never
+  signs) a `create_market`-if-needed + `deposit` transaction — `apps/keeper/src/chain.ts`
+  `buildDepositTransaction()` — returned base64 for the CLIENT to sign with Phantom
+  (`WalletContext.signAndSend()`) and submit itself. A connected wallet gets its OWN market instance
+  (authority = the wallet's own pubkey, PDA derived accordingly) — deliberately separate from
+  `settleMarket()`'s self-contained fake-bettor demo markets (different authority => different PDA,
+  no collision); see the design note below. Verified twice: a raw-Node scratch script simulating
+  Phantom (mint+deposit+2nd-deposit-skips-create, vault balance asserted on-chain), then a full
+  Playwright browser run with a MOCKED Phantom provider bridged to a real Node ed25519 signer (the
+  browser's own `VersionedTransaction.message` bytes signed for real, written into `tx.signatures[0]`)
+  — connect → fund → pick a market → submit → real confirmed signature with a working explorer link,
+  0 console errors. **PASS**
+- [x] P3.3 `POST /api/faucet {wallet, tokens?, sol?}` (built in Phase 1, wired into the UI now): mints
+  test USDC to the wallet's ATA (mint authority, no rate limit) + sends gas SOL as a direct transfer
+  from a funded wallet (sidesteps the public devnet airdrop's hard rate limit). "Fund my wallet" button
+  in the wallet panel; verified live. **PASS**
+- [ ] P3.4 settlement visualization: vault YES/NO balances, wallet balance before/after, step-by-step
+  CPI lifecycle indicator, every signature a real explorer link. **PENDING — deliberately sequenced
+  after Phase 4 merges**, since both touch `ReplayTheater.tsx`'s settlement panel and running them
+  in parallel across two worktrees would guarantee a merge conflict there.
+
+_Design note: a connected wallet's ticket creates its OWN market instance, not the one
+`settleMarket()`'s "Settle full-time markets" button uses. Both are real, honest, on-chain — they're
+just two different (by design) market PDAs for the same catalog entry, since `create_market`'s PDA is
+seeded by `authority`, and the demo-settle flow deliberately uses a fresh throwaway authority per run
+so repeated demo settles never collide. P3.4 will extend the settle path to ALSO resolve/claim a
+connected wallet's own market, closing the loop end-to-end._
 
 **Phase 4 — replay chart overhaul**
 - [ ] P4.1 `buildReplay()` pulls odds ticks for markets actually relevant to the catalog, not just 1X2

@@ -4,6 +4,8 @@ import { Storefront } from "./views/Storefront";
 import { ReplayTheater } from "./views/ReplayTheater";
 import { ProofReceiptView } from "./views/ProofReceiptView";
 import { IconShield, IconBolt } from "./components/icons";
+import { WalletProvider } from "./wallet/WalletContext";
+import { WalletWidget } from "./wallet/WalletWidget";
 
 export type View = "store" | "replay" | "receipt";
 export interface TicketLeg { market: Market; side: boolean; }
@@ -61,45 +63,48 @@ export function App() {
   const openReceipt = useCallback((marketId: string) => { setActiveReceipt(marketId); setView("receipt"); }, []);
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <img className="logo" src="/logos/lockup-horizontal-on-dark.svg" alt="PulsePlay" />
-        <nav>
-          <button className={`navlink ${view === "store" ? "active" : ""}`} onClick={() => setView("store")}>Markets</button>
-          <button className={`navlink ${view === "replay" ? "active" : ""}`} onClick={() => setView("replay")}>Replay</button>
-          <button className={`navlink ${view === "receipt" ? "active" : ""}`} onClick={() => setView("receipt")} disabled={!activeReceipt && Object.keys(settlements).length === 0}>Proof</button>
-        </nav>
-        <span className="spacer" />
-        <span className="badge net"><IconShield size={13} />{health?.network ?? "localnet"}</span>
-        <span className="badge sim">simulated money</span>
-        <span className="badge verified" title="TxLINE oracle CPI"><IconBolt size={12} />TxLINE settled</span>
-      </header>
+    <WalletProvider health={health}>
+      <div className="app">
+        <header className="topbar">
+          <img className="logo" src="/logos/lockup-horizontal-on-dark.svg" alt="PulsePlay" />
+          <nav>
+            <button className={`navlink ${view === "store" ? "active" : ""}`} onClick={() => setView("store")}>Markets</button>
+            <button className={`navlink ${view === "replay" ? "active" : ""}`} onClick={() => setView("replay")}>Replay</button>
+            <button className={`navlink ${view === "receipt" ? "active" : ""}`} onClick={() => setView("receipt")} disabled={!activeReceipt && Object.keys(settlements).length === 0}>Proof</button>
+          </nav>
+          <span className="spacer" />
+          <span className="badge net"><IconShield size={13} />{health?.network ?? "localnet"}</span>
+          <span className="badge sim">simulated money</span>
+          <span className="badge verified" title="TxLINE oracle CPI"><IconBolt size={12} />TxLINE settled</span>
+          <WalletWidget />
+        </header>
 
-      <main className="page">
-        {view === "store" && (
-          <Storefront
-            health={health} fixtures={fixtures} catalog={catalog} catalogLoading={catalogLoading}
-            selectedFixtureId={selectedFixtureId} onSelectFixture={selectFixture}
-            ticket={ticket} addLeg={addLeg} removeLeg={removeLeg}
-            onOpenReplay={() => setView("replay")}
-          />
-        )}
-        {view === "replay" && (
-          <ReplayTheater
-            catalog={catalog} health={health}
-            settlements={settlements} recordSettlement={recordSettlement}
-            onOpenReceipt={openReceipt} flash={flash}
-          />
-        )}
-        {view === "receipt" && (
-          <ProofReceiptView
-            catalog={catalog} settlements={settlements} activeReceipt={activeReceipt}
-            setActiveReceipt={setActiveReceipt} onBack={() => setView("replay")}
-          />
-        )}
-      </main>
+        <main className="page">
+          {view === "store" && (
+            <Storefront
+              health={health} fixtures={fixtures} catalog={catalog} catalogLoading={catalogLoading}
+              selectedFixtureId={selectedFixtureId} onSelectFixture={selectFixture}
+              ticket={ticket} addLeg={addLeg} removeLeg={removeLeg}
+              onOpenReplay={() => setView("replay")}
+            />
+          )}
+          {view === "replay" && (
+            <ReplayTheater
+              catalog={catalog} health={health}
+              settlements={settlements} recordSettlement={recordSettlement}
+              onOpenReceipt={openReceipt} flash={flash}
+            />
+          )}
+          {view === "receipt" && (
+            <ProofReceiptView
+              catalog={catalog} settlements={settlements} activeReceipt={activeReceipt}
+              setActiveReceipt={setActiveReceipt} onBack={() => setView("replay")}
+            />
+          )}
+        </main>
 
-      {toast && <div className="toast mono">{toast}</div>}
-    </div>
+        {toast && <div className="toast mono">{toast}</div>}
+      </div>
+    </WalletProvider>
   );
 }

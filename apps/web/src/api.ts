@@ -10,6 +10,7 @@ export interface SegmentedFixtures { live: FixtureCard[]; upcoming: FixtureCard[
 export interface Health {
   ok: boolean; engine: boolean; chain: boolean; programId: string; cluster: string;
   slot?: number; demoFixtureId: number; oracleProgram: string; moneyMode: string; network: string;
+  rpcUrl: string; explorerCluster: string;
 }
 
 export interface Leg { label: string; statLabel: string; fairPct: number; margin: number; source: string; }
@@ -57,16 +58,29 @@ export interface SettleResult {
   settledAt: number; proofFile: string; generation: "V1" | "V2" | "V3";
 }
 
+async function errorMessage(r: Response, path: string): Promise<string> {
+  try {
+    const j = await r.json();
+    if (j?.error) return String(j.error);
+  } catch { /* body wasn't JSON */ }
+  return `${path} → ${r.status}`;
+}
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path);
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) throw new Error(await errorMessage(r, path));
   return r.json();
 }
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) throw new Error(await errorMessage(r, path));
   return r.json();
 }
+
+export interface WalletBalances { sol: number; wagerToken: string; mint: string; mintLabel: string; mintDecimals: number }
+export interface WalletMarketInfo { market: string; vault: string; position: string; exists: boolean; cutoffTs: number | null; resolved: boolean | null }
+export interface FaucetResult { wallet: string; mint: string; mintedBaseUnits: string; solTxSig: string | null; ata: string }
+export interface BuildDepositResult { transactionBase64: string; market: string; vault: string; position: string; createdMarket: boolean }
+export interface BuildClaimResult { transactionBase64: string; market: string; vault: string }
 
 export const api = {
   health: () => get<Health>("/api/health"),
@@ -77,4 +91,11 @@ export const api = {
     post<ParlayResult>("/api/parlay", { legs, stake, pairwiseRho }),
   settle: (marketId: string) => post<{ result: SettleResult; receipt: ProofReceipt }>(`/api/settle/${marketId}`),
   receipt: (marketId: string) => get<ProofReceipt>(`/api/receipt/${marketId}`),
+
+  walletBalances: (wallet: string) => get<WalletBalances>(`/api/wallet/${wallet}/balances`),
+  walletMarket: (wallet: string, marketId: string) => get<WalletMarketInfo>(`/api/wallet/${wallet}/market/${marketId}`),
+  faucet: (wallet: string, tokens?: number, sol?: number) => post<FaucetResult>("/api/faucet", { wallet, tokens, sol }),
+  buildDeposit: (wallet: string, marketId: string, side: boolean, amountWhole: number) =>
+    post<BuildDepositResult>("/api/tickets/build-deposit", { wallet, marketId, side, amountWhole }),
+  buildClaim: (wallet: string, marketId: string) => post<BuildClaimResult>("/api/tickets/build-claim", { wallet, marketId }),
 };

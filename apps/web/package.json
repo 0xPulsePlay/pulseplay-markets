@@ -10,6 +10,8 @@
     "preview": "vite preview --port 4100 --strictPort"
   },
   "dependencies": {
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

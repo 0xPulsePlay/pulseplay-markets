@@ -253,6 +253,123 @@ const store = new Map<string, SettleResult>();
 export const getSettlement = (id: string) => store.get(id);
 export const allSettlements = () => [...store.values()];
 
+// ── Phase 3: wallet-signed transactions ─────────────────────────────────────────────────────────
+// The keeper builds these (it already has the Anchor Program + IDL loaded) but does NOT sign them —
+// it returns an unsigned, base64-encoded VersionedTransaction with `feePayer = wallet` for the
+// CLIENT to sign with Phantom and submit itself. This is the actual "wallet deposits into the vault"
+// flow (distinct from settleMarket()'s self-contained fake-bettor demo flow above, which stays
+// untouched — see docs/BUILD-STATUS.md Phase 3 for why they're deliberately separate market
+// instances: a connected wallet's OWN market PDA is keyed off the wallet's own pubkey as authority).
+
+export interface WalletMarketInfo {
+  market: string; vault: string; position: string; exists: boolean; cutoffTs: number | null; resolved: boolean | null;
+}
+
+/** The market PDA a given wallet would own for a catalog entry (authority = the wallet itself). */
+function walletMarketPda(prog: any, wallet: anchor.web3.PublicKey, m: Market) {
+  const [market] = PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), wallet.toBuffer(), i64le(CONFIG.demoFixtureId), u32le(m.statKey), i32le(m.period)], prog.programId);
+  return market;
+}
+
+export async function walletMarketStatus(walletB58: string, m: Market): Promise<WalletMarketInfo> {
+  const prog = program();
+  const conn = _conn!;
+  const mint = await wagerMint();
+  const wallet = new PublicKey(walletB58);
+  const market = walletMarketPda(prog, wallet, m);
+  const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const info = await conn.getAccountInfo(market);
+  if (!info) return { market: market.toBase58(), vault: vault.toBase58(), position: "", exists: false, cutoffTs: null, resolved: null };
+  const acct = await prog.account.market.fetch(market);
+  const position = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), market.toBuffer(), wallet.toBuffer(), Buffer.from([1])], prog.programId)[0];
+  return { market: market.toBase58(), vault: vault.toBase58(), position: position.toBase58(), exists: true, cutoffTs: acct.cutoffTs.toNumber(), resolved: acct.resolved };
+}
+
+export interface BuildDepositResult { transactionBase64: string; market: string; vault: string; position: string; createdMarket: boolean }
+
+/** Builds (does not sign) create_market-if-needed + deposit as ONE transaction — both instructions
+ *  need only the connected wallet's signature (it is authority AND depositor AND fee payer). */
+export async function buildDepositTransaction(walletB58: string, m: Market, side: boolean, amountWhole: number): Promise<BuildDepositResult> {
+  const prog = program();
+  const conn = _conn!;
+  const mint = await wagerMint();
+  const wallet = new PublicKey(walletB58);
+  const market = walletMarketPda(prog, wallet, m);
+  const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const position = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), market.toBuffer(), wallet.toBuffer(), Buffer.from([side ? 1 : 0])], prog.programId)[0];
+  const depositorTokenAccount = getAssociatedTokenAddressSync(mint, wallet, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+
+  const instructions: anchor.web3.TransactionInstruction[] = [];
+  const marketInfo = await conn.getAccountInfo(market);
+  const createdMarket = !marketInfo;
+  if (createdMarket) {
+    // Generous window (a week) — this market is created live, on demand, by whoever bets on it first;
+    // it needs to stay open long enough for a keeper settle pass to reach it after the replay's "full
+    // time" (which fast-forwards a HISTORICAL fixture, not a live clock).
+    const cutoff = new BN(Math.floor(Date.now() / 1000) + 7 * 86400);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 14 * 86400);
+    instructions.push(await prog.methods
+      .createMarket(new BN(CONFIG.demoFixtureId), m.statKey, m.period, m.threshold, m.comparison, cutoff, deadline, m.combineOp, m.kind)
+      .accounts({
+        authority: wallet, market, mint, vault,
+        tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      }).instruction());
+  }
+  const amountBaseUnits = new BN(Math.round(amountWhole * 10 ** CONFIG.wagerMintDecimals));
+  instructions.push(await prog.methods.deposit(side, amountBaseUnits)
+    .accounts({
+      depositor: wallet, market, mint, vault, depositorTokenAccount, position,
+      tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    }).instruction());
+
+  const { blockhash } = await conn.getLatestBlockhash("confirmed");
+  const msg = new anchor.web3.TransactionMessage({ payerKey: wallet, recentBlockhash: blockhash, instructions }).compileToV0Message();
+  const vtx = new anchor.web3.VersionedTransaction(msg);
+  return { transactionBase64: Buffer.from(vtx.serialize()).toString("base64"), market: market.toBase58(), vault: vault.toBase58(), position: position.toBase58(), createdMarket };
+}
+
+export interface BuildClaimResult { transactionBase64: string; market: string; vault: string }
+
+/** Builds (does not sign) a claim transaction for a connected wallet's own resolved market. */
+export async function buildClaimTransaction(walletB58: string, m: Market): Promise<BuildClaimResult> {
+  const prog = program();
+  const mint = await wagerMint();
+  const wallet = new PublicKey(walletB58);
+  const market = walletMarketPda(prog, wallet, m);
+  const acct = await prog.account.market.fetch(market);
+  const vault = getAssociatedTokenAddressSync(mint, market, true, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const ownerTokenAccount = getAssociatedTokenAddressSync(mint, wallet, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const position = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), market.toBuffer(), wallet.toBuffer(), Buffer.from([acct.outcome ? 1 : 0])], prog.programId)[0];
+  const ix = await prog.methods.claim()
+    .accounts({ owner: wallet, market, mint, vault, ownerTokenAccount, position, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
+    .instruction();
+  const { blockhash } = await _conn!.getLatestBlockhash("confirmed");
+  const msg = new anchor.web3.TransactionMessage({ payerKey: wallet, recentBlockhash: blockhash, instructions: [ix] }).compileToV0Message();
+  const vtx = new anchor.web3.VersionedTransaction(msg);
+  return { transactionBase64: Buffer.from(vtx.serialize()).toString("base64"), market: market.toBase58(), vault: vault.toBase58() };
+}
+
+export interface WalletBalances { sol: number; wagerToken: string; mint: string; mintLabel: string; mintDecimals: number }
+
+/** SOL + wager-token balance for any wallet (used by the connect-wallet panel). */
+export async function walletBalances(walletB58: string): Promise<WalletBalances> {
+  program();
+  const conn = _conn!;
+  const mint = await wagerMint();
+  const wallet = new PublicKey(walletB58);
+  const sol = (await conn.getBalance(wallet)) / LAMPORTS_PER_SOL;
+  const ata = getAssociatedTokenAddressSync(mint, wallet, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  let wagerToken = "0";
+  try {
+    wagerToken = (await conn.getTokenAccountBalance(ata)).value.amount;
+  } catch { /* ATA doesn't exist yet — 0 balance, not an error */ }
+  return { sol, wagerToken, mint: mint.toBase58(), mintLabel: CONFIG.wagerMintLabel, mintDecimals: CONFIG.wagerMintDecimals };
+}
+
 /** Run the full trustless lifecycle for a market on-chain. Idempotent-ish: re-runs with a fresh authority. */
 export async function settleMarket(m: Market): Promise<SettleResult> {
   const prog = program();

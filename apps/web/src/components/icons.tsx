@@ -21,3 +21,6 @@ export const IconPlus = svg(<><line x1="12" y1="6" x2="12" y2="18" /><line x1="6
 export const IconX = svg(<><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></>);
 export const IconTarget = svg(<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></>);
 export const IconLink = svg(<><path d="M9 15l6-6" /><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1" /><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1" /></>);
+export const IconWallet = svg(<><path d="M3 7a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1h-3a3 3 0 0 0 0 6h3v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M17 11h1a1 1 0 0 1 1 1v0a1 1 0 0 1-1 1h-1" /></>);
+export const IconDroplet = svg(<path d="M12 3s6 6.5 6 10.5a6 6 0 0 1-12 0C6 9.5 12 3 12 3Z" />);
+export const IconSpinner = svg(<><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M21 12a9 9 0 0 0-9-9" /></>);

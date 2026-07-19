@@ -5,7 +5,10 @@ import { compareParlay, type ParlayLeg } from "@pulseplay/pricing";
 import { CONFIG } from "./config.js";
 import { segmentedFixtures, fixtureCard, buildReplay } from "./engine.js";
 import { buildCatalog, type Market } from "./catalog.js";
-import { settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements, faucetFund } from "./chain.js";
+import {
+  settleMarket, buildReceipt, chainHealth, getSettlement, allSettlements, faucetFund,
+  walletBalances, walletMarketStatus, buildDepositTransaction, buildClaimTransaction,
+} from "./chain.js";
 
 const app = express();
 app.use(cors());
@@ -26,7 +29,11 @@ app.get("/api/health", wrap(async (_req, res) => {
   const ch = await chainHealth();
   let engine = false;
   try { engine = (await (await fetch(`${CONFIG.engineUrl}/health`)).json()).ok === true; } catch { /* down */ }
-  res.json({ ok: true, engine, ...ch, demoFixtureId: CONFIG.demoFixtureId, oracleProgram: CONFIG.oracleProgram, moneyMode: "simulated", network: CONFIG.cluster });
+  res.json({
+    ok: true, engine, ...ch, demoFixtureId: CONFIG.demoFixtureId, oracleProgram: CONFIG.oracleProgram,
+    moneyMode: "simulated", network: CONFIG.cluster, rpcUrl: CONFIG.rpcUrl,
+    explorerCluster: CONFIG.cluster === "devnet" ? "devnet" : `custom&customUrl=${encodeURIComponent(CONFIG.rpcUrl)}`,
+  });
 }));
 
 app.get("/api/fixtures", wrap(async (_req, res) => res.json(await segmentedFixtures())));
@@ -80,6 +87,38 @@ app.get("/api/settlement/:marketId", wrap(async (req, res) => {
   const s = getSettlement(req.params.marketId);
   if (!s) return res.status(404).json({ error: "not settled" });
   res.json(s);
+}));
+
+// ── Phase 3: wallet-connected ticket submission ──────────────────────────────────────────────────
+// The keeper builds these transactions (it has the Anchor Program + IDL) but never signs them; the
+// CLIENT signs with Phantom and submits itself. See chain.ts for why a connected wallet gets its OWN
+// market instance (authority = the wallet) rather than reusing settleMarket()'s fake-bettor markets.
+
+app.get("/api/wallet/:wallet/balances", wrap(async (req, res) => res.json(await walletBalances(req.params.wallet))));
+
+app.get("/api/wallet/:wallet/market/:marketId", wrap(async (req, res) => {
+  const m = await findMarket(req.params.marketId);
+  if (!m) return res.status(404).json({ error: "unknown market" });
+  res.json(await walletMarketStatus(req.params.wallet, m));
+}));
+
+app.post("/api/tickets/build-deposit", wrap(async (req, res) => {
+  const { wallet, marketId, side, amountWhole } = req.body ?? {};
+  if (!wallet || !marketId || typeof side !== "boolean") return res.status(400).json({ error: "wallet, marketId, side (boolean) required" });
+  const m = await findMarket(marketId);
+  if (!m) return res.status(404).json({ error: "unknown market" });
+  if (!m.settleable) return res.status(400).json({ error: "this fixture has no recorded settlement proof — pick the demo semifinal to bet on a market that will actually resolve" });
+  const result = await buildDepositTransaction(wallet, m, side, Number(amountWhole ?? 1));
+  res.json(result);
+}));
+
+app.post("/api/tickets/build-claim", wrap(async (req, res) => {
+  const { wallet, marketId } = req.body ?? {};
+  if (!wallet || !marketId) return res.status(400).json({ error: "wallet, marketId required" });
+  const m = await findMarket(marketId);
+  if (!m) return res.status(404).json({ error: "unknown market" });
+  const result = await buildClaimTransaction(wallet, m);
+  res.json(result);
 }));
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

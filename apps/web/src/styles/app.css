@@ -136,6 +136,13 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.block { width: 100%; }
+.rot { transform: rotate(90deg); transition: transform var(--pp-motion-feedback) var(--pp-motion-ease); }
+.spin { animation: spin 0.9s linear infinite; }
+
+/* ============ wallet ============ */
+.wallet-widget { position: relative; }
+.wallet-btn { min-height: 34px; padding: 0 10px; font-size: var(--pp-text-2xs); }
+.wallet-panel { position: absolute; top: calc(100% + 8px); right: 0; width: 260px; padding: var(--pp-space-4); z-index: 60; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
 
 /* ============ ticket rail ============ */
 .rail { position: sticky; top: 76px; display: grid; gap: var(--pp-space-3); }
