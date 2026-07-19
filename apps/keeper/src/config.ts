@@ -78,4 +78,6 @@ export const TEAM_CODES: Record<string, string> = {
   Germany: "de", Portugal: "pt", Netherlands: "nl", Italy: "it", Croatia: "hr",
   Morocco: "ma", "New Zealand": "nz", India: "in", Belgium: "be", Uruguay: "uy",
   Japan: "jp", "United States": "us", Mexico: "mx", Colombia: "co", Senegal: "sn",
+  Austria: "at", Switzerland: "ch", Poland: "pl", Canada: "ca", Qatar: "qa",
+  Scotland: "gb-sct", Australia: "au", "Saudi Arabia": "sa", Sweden: "se", Denmark: "dk",
 };

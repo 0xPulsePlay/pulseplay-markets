@@ -206,10 +206,14 @@ doesn't own._
   real de-margined prices + the priced-only banner + a confirmation toast; clicked back to "England v
   Argentina", the Replay CTA and settle flow returned. 0 console errors. Screenshots at
   `/tmp/p2-02-after-click.png` (this session's scratch dir, not committed).  **PASS**
-- [~] P2.3 flag coverage: 10 of ~20 `TEAM_CODES` entries have real SVGs (`gb-eng, ar, fr, br, es, de,
-  pt, nl, hr, ma`); everything else (most of the ~110 finished fixtures — Jordan, Algeria, Austria,
-  Uruguay, New Zealand, India, …) falls back to a monogram, which reads fine but is lower-fidelity.
-  Left as-is per the brief's own priority call; a good fast-follow if time remains after Phase 5.  PENDING (deliberately deferred)
+- [x] P2.3 flag coverage extended (used spare time while the Phase 4 sub-agent ran): all 20 original
+  `TEAM_CODES` entries now have real SVGs (added Italy, Belgium, Mexico, Senegal, Colombia, Japan,
+  United States, Uruguay, New Zealand, India — previously coded but falling back to a monogram), plus
+  10 new team codes + flags for teams that showed up repeatedly in the fixtures list (Austria,
+  Switzerland, Poland, Canada, Qatar, Scotland, Australia, Saudi Arabia, Sweden, Denmark) — 30 real
+  flags total. Verified visually (Playwright screenshot, 0 console errors). Remaining monogram
+  fallbacks (Jordan, Algeria, Haiti, Liechtenstein, Gibraltar, Cape Verde, …) are lower-frequency
+  teams — reads fine, left as-is.  **PASS**
 - [x] P2.4 category tabs now show a genuine plain-language one-liner above the technical blurb (e.g.
   Outcomes: "One question, one answer — e.g. 'will they score?'"; Combos: "Bundle a few outcomes from
   the SAME match — all legs settle together, in one transaction."; Batch: "Bigger tickets, including
