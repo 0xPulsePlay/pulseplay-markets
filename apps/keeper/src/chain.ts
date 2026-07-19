@@ -9,7 +9,8 @@ import BN from "bn.js";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { statLeaf, describeStatKey } from "@txline/verify";
+import { statLeaf, describeStatKey, verifyScoresStatProofOnChain } from "@txline/verify";
+import type { AccountReader, OnChainScoreVerification } from "@txline/verify";
 import {
   createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo,
   TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -76,10 +77,16 @@ const hex = (bytes: number[]) => "0x" + Buffer.from(bytes).toString("hex");
 let _program: any | null = null;
 let _conn: anchor.web3.Connection | null = null;
 let _operator: anchor.web3.Keypair | null = null;
+/** The keeper's own read/write Solana connection, lazily created and shared across settlement + the
+ *  receipt's direct daily_scores_roots PDA read (a `Connection` structurally satisfies AccountReader). */
+function rpcConn(): anchor.web3.Connection {
+  if (!_conn) _conn = new Connection(CONFIG.rpcUrl, "confirmed");
+  return _conn;
+}
 function program() {
   if (_program) return _program;
   const idl = loadJson(IDL_PATH);
-  _conn = new Connection(CONFIG.rpcUrl, "confirmed");
+  _conn = rpcConn();
   _operator = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
   const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(_operator), { commitment: "confirmed" });
   _program = new anchor.Program(idl, provider);
@@ -573,18 +580,36 @@ export interface ProofReceipt {
   oracleProgram: string;
 }
 
-const validationCache = new Map<string, any>();
-async function engineValidation(statKey: number): Promise<any> {
-  const key = String(statKey);
-  if (validationCache.has(key)) return validationCache.get(key);
-  const url = `${CONFIG.engineUrl}/v1/validation/scores?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKeys=${statKey}&verify=1`;
-  const res = await fetch(url);
-  const j = await res.json();
-  validationCache.set(key, j);
-  return j;
+// Canonical V1 seq=960 scores proofs (each ships the recorded daily_scores_roots PDA bytes) whose
+// membership walk folds up to this fixture's anchored 5-min-slot root. That slot root is fixture-wide
+// (identical across every stat recorded in the slot), so the receipt's on-chain step can verify it
+// from ANY leg's proof — we pick the one that carries the market's own stat key for a faithful walk.
+const ONCHAIN_ROOT_PROOF_BY_STATKEY: Record<number, string> = {
+  7: "scores-proof-18241006-seq960-keys7-8.json",
+  8: "scores-proof-18241006-seq960-keys7-8.json",
+};
+const DEFAULT_ONCHAIN_ROOT_PROOF = "scores-proof-18241006-seq960-keys1-2.json";
+
+/**
+ * Verify the fixture's anchored daily-scores slot root by RECONSTRUCTING it from a recorded proof and
+ * reading the REAL `daily_scores_roots` PDA account directly over RPC — no engine dependency. Returns
+ * null only on an RPC/read error (verifyScoresStatProofOnChain never throws for a failed proof), which
+ * the caller renders as the honest "on-chain verification unavailable" state (never a spurious green).
+ * `reader` is injectable so tests replay recorded PDA bytes hermetically; production uses the keeper's
+ * own Connection.
+ */
+async function onChainDailyScoresRoot(statKey: number, reader?: AccountReader): Promise<OnChainScoreVerification | null> {
+  const file = ONCHAIN_ROOT_PROOF_BY_STATKEY[statKey] ?? DEFAULT_ONCHAIN_ROOT_PROOF;
+  const raw = loadJson(join(FIXDIR, file));
+  const proof = raw.proof ?? raw;
+  try {
+    return await verifyScoresStatProofOnChain(CONFIG.rpcUrl, proof, reader ?? rpcConn(), { programId: CONFIG.oracleProgram });
+  } catch {
+    return null; // RPC unreachable / PDA read failed — fall through to the honest-unavailable receipt
+  }
 }
 
-export async function buildReceipt(m: Market): Promise<ProofReceipt> {
+export async function buildReceipt(m: Market, reader?: AccountReader): Promise<ProofReceipt> {
   const proofRaw = loadJson(join(FIXDIR, m.fixtureProofFile));
   const proof = proofRaw.proof ?? proofRaw;
   // leg-0 stat (the market question's anchor stat)
@@ -595,21 +620,23 @@ export async function buildReceipt(m: Market): Promise<ProofReceipt> {
   const leafHash = "0x" + Buffer.from(statLeaf(triple)).toString("hex");
   const desc = describeStatKey(triple.key);
 
-  const v = await engineValidation(m.statKey).catch(() => null);
-  const oc = v?.onChain ?? null;
+  const oc = await onChainDailyScoresRoot(m.statKey, reader);
   const norm = (h: string) => "0x" + h.replace(/^0x/, "");
-  // A verdict is only real when the engine returned BOTH roots. Never fabricate equality — on a trust
-  // product a spurious green check is the worst bug class, so absent a verdict we show "unverified".
+  // A verdict is only real when we reconstructed the root AND read a root from the on-chain PDA. Never
+  // fabricate equality — on a trust product a spurious green check is the worst bug class, so absent a
+  // live on-chain root we show "unverified" (and hide the reconstructed value so the UI can't misread
+  // it as a red mismatch). computedRootHex is a client-side reconstruction from the proof; onChainRootHex
+  // is null when the PDA read failed / the PDA doesn't exist on this cluster.
   const computed: string | null = oc?.computedRootHex ? norm(oc.computedRootHex) : null;
   const onChainRoot: string | null = oc?.onChainRootHex ? norm(oc.onChainRootHex) : null;
   const haveVerdict = !!(computed && onChainRoot);
   const match = haveVerdict && computed === onChainRoot;
-  const verified = haveVerdict && (oc?.verified ?? oc?.subTreeVerified ?? false) === true && match;
+  const verified = haveVerdict && (oc?.verified ?? false) === true && match;
   const epochDay = oc?.epochDay ?? 20649;
   const settlement = store.get(m.id);
 
   const onChainPlain = !haveVerdict
-    ? `On-chain verification is currently unavailable (the engine's read-only verify call did not return a verdict). We are NOT asserting a match — re-open once the engine is reachable to confirm the reconstructed root against the anchored PDA.`
+    ? `On-chain verification is currently unavailable (the keeper could not read the daily_scores_roots PDA over RPC). We are NOT asserting a match — re-open once the RPC endpoint is reachable to confirm the reconstructed root against the anchored PDA.`
     : match
       ? `TxLINE anchored that exact daily root on Solana in the daily_scores_roots PDA. Your reconstructed root ${computed!.slice(0, 10)}… EQUALS the on-chain root ${onChainRoot!.slice(0, 10)}… — so the result is exactly what Solana recorded. No committee, no vote: the proof is the resolution.`
       : `The reconstructed root ${computed!.slice(0, 10)}… does NOT equal the on-chain root ${onChainRoot!.slice(0, 10)}… — this proof would be rejected. Settlement never proceeds on a mismatch.`;
@@ -637,16 +664,16 @@ export async function buildReceipt(m: Market): Promise<ProofReceipt> {
         title: "3 · The day's anchored root",
         plain: haveVerdict
           ? `That subtree folds into the root of every stat TxLINE recorded on epoch day ${epochDay}. This root is reconstructed from your proof, client-side.`
-          : `That subtree folds into the day's root of every stat TxLINE recorded (epoch day ${epochDay}). The reconstructed value is unavailable until the engine verify call succeeds.`,
-        hashHex: computed ?? "(unavailable — engine verify offline)",
+          : `That subtree folds into the day's root of every stat TxLINE recorded (epoch day ${epochDay}). We hold off showing the reconstructed value until the on-chain PDA read succeeds and we can compare the two.`,
+        hashHex: haveVerdict ? computed! : "(unavailable — on-chain PDA read offline)",
         epochDay,
       },
       onChain: {
         title: "4 · The on-chain match",
         plain: onChainPlain,
         pda: oc?.pda ?? CONFIG.dailyScoresRootsPda,
-        onChainRootHex: onChainRoot ?? "(unavailable)",
-        computedRootHex: computed ?? "(unavailable)",
+        onChainRootHex: haveVerdict ? onChainRoot! : "(unavailable)",
+        computedRootHex: haveVerdict ? computed! : "(unavailable)",
         match,
       },
     },

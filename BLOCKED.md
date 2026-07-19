@@ -51,8 +51,10 @@ the instruction data outside Anchor's coder (e.g. via `@txline/verify` encoders)
 The `solana-test-validator` that clones the mainnet oracle + PDA was OOM-reaped once while five hackathon
 apps were building in parallel. It is not a code issue — restart with the documented command (see
 STATUS-FOR-MIKAIL.md → Run it) and re-deploy; the escrow test suite + keeper `/api/settle` reproduce all
-on-chain evidence in ~1 minute. The pricing tests and the storefront/proof-receipt (which reads on-chain
-roots via the engine's mainnet verify) do not require the local validator.
+on-chain evidence in ~1 minute. The pricing tests do not require the local validator. (Round-3 note: the
+proof-receipt's step-4 match now reads the `daily_scores_roots` PDA **directly over the keeper's Solana
+RPC connection**, not via the engine — so it needs the validator/RPC reachable; if the read fails it
+degrades to the honest "on-chain verification unavailable" state rather than a false verdict.)
 
 ## 4. V3 proofs are recorded fixtures, not live `/v1` (by design)
 The local `/v1` surface does not serve V3 multiproofs (engine brief §7.4/§11). The V3 combo + batch demos

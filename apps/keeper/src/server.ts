@@ -28,7 +28,7 @@ const wrap = (fn: express.Handler): express.Handler => (req, res, next) => Promi
 app.get("/api/health", wrap(async (_req, res) => {
   const ch = await chainHealth();
   let engine = false;
-  try { engine = (await (await fetch(`${CONFIG.engineUrl}/health`)).json()).ok === true; } catch { /* down */ }
+  try { const h = (await (await fetch(`${CONFIG.engineUrl}/health`)).json()) as { ok?: boolean }; engine = h.ok === true; } catch { /* down */ }
   res.json({
     ok: true, engine, ...ch, demoFixtureId: CONFIG.demoFixtureId, oracleProgram: CONFIG.oracleProgram,
     moneyMode: "simulated", network: CONFIG.cluster, rpcUrl: CONFIG.rpcUrl,

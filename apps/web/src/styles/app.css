@@ -197,6 +197,10 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .connector { width: 1px; height: 14px; background: var(--pp-color-border-strong); margin-left: 13px; }
 .match-banner { display: flex; align-items: center; gap: var(--pp-space-3); padding: var(--pp-space-3) var(--pp-space-4); border: 1px solid color-mix(in srgb, var(--pp-color-verified) 45%, var(--pp-color-border)); border-radius: var(--pp-radius-card); }
 .match-banner .tick { color: var(--pp-color-verified); }
+/* Let the flex text column shrink and the base58 PDA wrap — an unbreakable 44-char address is what
+   forced the receipt card wider than a 390px viewport (its min-content cascaded up through the step). */
+.match-banner > div { min-width: 0; }
+.match-banner .mono { word-break: break-all; }
 
 /* ============ misc ============ */
 .row { display: flex; align-items: center; gap: var(--pp-space-3); }

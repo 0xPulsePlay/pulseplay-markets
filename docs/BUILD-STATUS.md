@@ -79,8 +79,34 @@ on-chain root". 0 console/page errors. Screenshots 01–09 in docs/screenshots/.
 - [x] **Removed topbar backdrop blur** (GUIDE §5 bans glass/blur) — `backdrop-filter: none` verified.  **PASS**
 - [x] **Hero scoreline wraps cleanly** on narrow mobile; added `body { overflow-x: hidden }` safety.  **PASS**
 
-_Evidence: mobile.mjs (390px, 0 errors, no overflow, blur none) + desktop journey (0 errors, receipt
-green match preserved). Screenshots 10-mobile-storefront, 11-mobile-replay added._
+_Evidence: mobile.mjs (390px, 0 errors, no overflow, blur none) + desktop journey (0 errors). Screenshots
+10-mobile-storefront, 11-mobile-replay added. NOTE: the Round-2 desktop journey's "green match" was
+produced by the external engine's `/v1/validation/scores?verify=1` call; that endpoint later proved to be
+throwing server-side (a pre-existing engine bug), so the receipt's step-4 match no longer rendered green.
+Round-3 removes the dependency entirely — see below._
+
+## Round-3 fixes (post independent-verification, second pass)
+- [x] **P1-a — receipt on-chain match is now self-sufficient (no engine dependency).** `buildReceipt()`
+  no longer calls the flaky external engine (`{engineUrl}/v1/validation/scores?verify=1`, which throws
+  `reading 'map'` server-side against both this build and baseline). It now reconstructs the fixture's
+  anchored 5-min-slot scores root from a recorded proof AND reads the **real `daily_scores_roots` PDA
+  directly over the keeper's own Solana RPC connection** (`@txline/verify` `verifyScoresStatProofOnChain`
+  with the keeper `Connection` injected as the account reader), then compares the two. Verified live on
+  localnet: computed root `0x8213ec7f…` == on-chain root `0x8213ec7f…`, PDA
+  `6d9bJ2EtjAFj2k3CKbe2VV8qZ5BgdBnGsYjWApxHWgtE`, `verified: true`. A transient RPC failure falls through
+  to the pre-existing honest "on-chain verification unavailable — not asserting a match" state (never a
+  spurious green, never a false red). 4 new hermetic keeper tests (recorded-PDA reader + null/throwing
+  reader). **PASS**
+- [x] **P1-b — Proof Receipt view no longer overflows at 390px.** The receipt view was not covered by the
+  earlier mobile pass. Root cause: the 44-char base58 PDA in the step-4 match banner (`.match-banner .mono`)
+  was an unbreakable token; its min-content cascaded up through the step gutter and card padding, forcing
+  `.card` to 441.5px and `document.documentElement.scrollWidth` to **458** at a 390px viewport. Fix: allow
+  that mono string to wrap (`word-break: break-all` + `min-width:0` on the banner's flex text column).
+  Verified with Playwright at exactly 390px across all 6 settled-market receipts: `scrollWidth === innerWidth
+  === 390` (was 458), zero overflowing elements, desktop layout unchanged. **PASS**
+- [x] **P2 — the two pre-existing keeper `tsc` errors fixed.** Added `@types/bn.js` devDependency (chain.ts
+  BN import) and a typed narrowing for the `Response.json()` `unknown` in `server.ts`. `apps/keeper`
+  `tsc --noEmit` now exits 0. Zero runtime impact (keeper runs via `tsx`). **PASS**
 
 ## Cut-line (protect in this order if time compresses)
 1. V1+V2 escrow settling e2e on localnet with tests  ← highest
@@ -357,7 +383,8 @@ _Evidence (apps/keeper/src/engine.ts, apps/keeper/test/engine.test.ts, apps/web/
 
 ## PASS/PENDING table (Night 2)
 _ALL PHASES DONE: 0, 1, 2, 3, 4, 5. Full regression clean as of the final commit: pricing 15/15, onchain
-escrow 15/15, keeper engine unit tests 34/34, both apps typecheck clean (pre-existing bn.js +
-server.ts `unknown` errors only — present before this session, not introduced by it), full Playwright
-journey 0 console errors including a 390px mobile pass. See `STATUS-FOR-MIKAIL.md` for the
-handoff-level summary and `BLOCKED.md` for the two genuinely-still-open items (§5, §6)._
+escrow 15/15, keeper engine + receipt unit tests 38/38, both apps typecheck clean (the two pre-existing
+keeper `tsc` errors — bn.js declarations + a `server.ts` `unknown` narrowing — are now fixed in Round-3,
+so `apps/keeper` and `apps/web` both `tsc --noEmit` at 0 errors), full Playwright journey 0 console errors
+including a 390px mobile pass. See `STATUS-FOR-MIKAIL.md` for the handoff-level summary and `BLOCKED.md`
+for the two genuinely-still-open items (§5, §6)._
