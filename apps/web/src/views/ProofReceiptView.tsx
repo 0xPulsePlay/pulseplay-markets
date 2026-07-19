@@ -122,7 +122,7 @@ export function ProofReceiptView({ catalog, settlements, activeReceipt, setActiv
           {settle && <>
             <div className="stat-row"><span className="k">Settle tx</span></div>
             <div className="txlink" style={{ marginBottom: 8 }}>{settle.txids.resolve}</div>
-            <div className="stat-row"><span className="k">Winner claimed</span><span className="v yes">{(settle.potLamports / 1e9).toFixed(2)} SOL</span></div>
+            <div className="stat-row"><span className="k">Winner claimed</span><span className="v yes">{(Number(settle.potBaseUnits) / 10 ** settle.mintDecimals).toFixed(2)} {settle.mintLabel}</span></div>
           </>}
           <div className="row" style={{ gap: 6, marginTop: 10 }}>
             <span className="badge net">localnet</span><span className="badge sim">simulated money</span>

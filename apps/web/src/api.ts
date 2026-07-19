@@ -50,9 +50,11 @@ export interface ProofReceipt {
 }
 
 export interface SettleResult {
-  marketId: string; outcome: boolean; winningSide: "YES" | "NO"; potLamports: number; market: string;
+  marketId: string; outcome: boolean; winningSide: "YES" | "NO";
+  potBaseUnits: string; mint: string; mintDecimals: number; mintLabel: string;
+  market: string; vault: string;
   txids: { create: string; depositYes: string; depositNo: string; resolve: string; claim: string };
-  settledAt: number; proofFile: string; generation: "V1" | "V3";
+  settledAt: number; proofFile: string; generation: "V1" | "V2" | "V3";
 }
 
 async function get<T>(path: string): Promise<T> {
