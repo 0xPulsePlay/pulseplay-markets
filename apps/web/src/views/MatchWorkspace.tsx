@@ -1,12 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Catalog, type Health, type ReplayData, type ReplayKeyframe, type ReplaySeriesDef, type PhaseBand, type MatchPhase, type Market, type WalletMarketInfo, type ResolveWalletMarketResult } from "../api";
-import type { Settled } from "../App";
+import { api, type Catalog, type Health, type SegmentedFixtures, type ReplayData, type ReplayKeyframe, type ReplaySeriesDef, type PhaseBand, type MatchPhase, type Market, type WalletMarketInfo, type ResolveWalletMarketResult } from "../api";
+import type { Settled, TicketLeg } from "../App";
 import { Flag } from "../components/Flags";
+import { FixturePicker } from "../components/FixturePicker";
+import { MarketCard } from "../components/MarketCard";
+import { TicketBuilder } from "../components/TicketBuilder";
 import { useWallet } from "../wallet/WalletContext";
-import { IconPlay, IconPause, IconReplay, IconBolt, IconShield, IconCheck, IconChevron, IconWallet, IconSpinner } from "../components/icons";
+import { IconPlay, IconPause, IconReplay, IconBolt, IconCheck, IconChevron, IconWallet, IconSpinner } from "../components/icons";
 
 const SPEEDS = [1, 4, 12];
 const BASE_MS = 30000; // full match plays in 30s at 1× — cinematic, continuous, never compressed to mush
+const CATS: { key: Market["category"]; label: string; plain: string; blurb: string }[] = [
+  { key: "outcomes", label: "Outcomes", plain: "One question, one answer — e.g. \"will they score?\"", blurb: "Single-claim markets · V1 validate_stat" },
+  { key: "combos", label: "Combos", plain: "Bundle a few outcomes from the SAME match — all legs settle together, in one transaction.", blurb: "Same-match multi-leg · V2 indexed strategy, one CPI" },
+  { key: "batch", label: "Batch", plain: "Bigger tickets, including calculated markets like a corner-count difference.", blurb: "Mega-tickets & derived markets · V3 multiproof" },
+];
 
 /** Plain-language label for the refined phase enum — display-only, mirrors engine.ts's PHASE_LABEL. */
 const MATCH_PHASE_LABEL: Record<MatchPhase, string> = {
@@ -17,10 +25,14 @@ const MATCH_PHASE_LABEL: Record<MatchPhase, string> = {
 interface Frame {
   clockSeconds: number; minuteLabel: string; score: { home: number; away: number };
   winProb: { home: number; draw: number; away: number } | null; phase: string; matchPhase: MatchPhase; half: number;
+  /** Every ReplayKeyframe.series id, linearly interpolated at the current progress — lets market cards
+   *  drive their YES/NO odds off the exact same replay frame the chart/scoreboard render (Night 3 Phase
+   *  C: "watch the odds update while you bet", not a separately-fetched live/canned number). */
+  series: Record<string, number | null>;
 }
 
 function interpolate(kfs: ReplayKeyframe[], p: number): Frame {
-  if (!kfs.length) return { clockSeconds: 0, minuteLabel: "00:00", score: { home: 0, away: 0 }, winProb: null, phase: "", matchPhase: "pre-match", half: 0 };
+  if (!kfs.length) return { clockSeconds: 0, minuteLabel: "00:00", score: { home: 0, away: 0 }, winProb: null, phase: "", matchPhase: "pre-match", half: 0, series: {} };
   const x = Math.max(0, Math.min(1, p));
   let i = 0;
   while (i < kfs.length - 1 && kfs[i + 1].t <= x) i++;
@@ -34,17 +46,36 @@ function interpolate(kfs: ReplayKeyframe[], p: number): Frame {
     draw: a.winProb.draw + (b.winProb.draw - a.winProb.draw) * f,
     away: a.winProb.away + (b.winProb.away - a.winProb.away) * f,
   } : a.winProb;
+  const series: Record<string, number | null> = {};
+  for (const id of Object.keys(a.series)) {
+    const av = a.series[id], bv = b.series[id];
+    series[id] = av != null && bv != null ? av + (bv - av) * f : av ?? bv ?? null;
+  }
   return {
     clockSeconds: cs, minuteLabel: /HT/.test(a.minuteLabel) ? "HT" : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`,
-    score: a.score, winProb: wp, phase: a.phase, matchPhase: a.matchPhase, half: a.half,
+    score: a.score, winProb: wp, phase: a.phase, matchPhase: a.matchPhase, half: a.half, series,
   };
 }
 
-export function ReplayTheater({ catalog, health, settlements, recordSettlement, onOpenReceipt, flash }: {
-  catalog: Catalog | null; health: Health | null; settlements: Record<string, Settled>;
-  recordSettlement: (s: Settled) => void; onOpenReceipt: (id: string) => void; flash: (m: string) => void;
+/**
+ * Night 3 Phase C + E: the single integrated match page. Pick a fixture (top, segmented Live/Upcoming/
+ * Completed) and on the SAME page watch the replay drive the scoreboard + chart + live-updating odds
+ * while the ticket builder stays visible in the sidebar — no separate "Replay" destination. This
+ * replaces the old two-view split (Storefront -> "Watch the replay" -> a different ReplayTheater route).
+ */
+export function MatchWorkspace({
+  health, fixtures, catalog, catalogLoading, selectedFixtureId, onSelectFixture,
+  ticket, addLeg, removeLeg, settlements, recordSettlement, onOpenReceipt, flash,
+}: {
+  health: Health | null; fixtures: SegmentedFixtures | null; catalog: Catalog | null; catalogLoading?: boolean;
+  selectedFixtureId: number | null; onSelectFixture: (fixtureId: number, label?: string) => void;
+  ticket: TicketLeg[]; addLeg: (m: Market, side: boolean) => void; removeLeg: (id: string) => void;
+  settlements: Record<string, Settled>; recordSettlement: (s: Settled) => void;
+  onOpenReceipt: (id: string) => void; flash: (m: string) => void;
 }) {
+  const [cat, setCat] = useState<Market["category"]>("outcomes");
   const [replay, setReplay] = useState<ReplayData | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
@@ -52,9 +83,23 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
+  const demoFixtureId = health?.demoFixtureId ?? 18241006;
+  const activeFixtureId = selectedFixtureId ?? catalog?.fixtureId ?? demoFixtureId;
+  const active = useMemo(() => {
+    if (!fixtures) return undefined;
+    return [...fixtures.live, ...fixtures.upcoming, ...fixtures.finished].find((f) => f.id === activeFixtureId);
+  }, [fixtures, activeFixtureId]);
+  const isDemo = activeFixtureId === demoFixtureId;
+
+  // Fetch the replay whenever the fixture (via catalog) changes; reset transport state.
   useEffect(() => {
     if (!catalog) return;
-    api.replay(catalog.fixtureId).then((r) => { setReplay(r); setProgress(0); setPlaying(true); }).catch(() => {});
+    setReplayLoading(true);
+    setReplay(null);
+    api.replay(catalog.fixtureId)
+      .then((r) => { setReplay(r); setProgress(0); setPlaying(r.keyframes.length > 1); })
+      .catch(() => setReplay(null))
+      .finally(() => setReplayLoading(false));
   }, [catalog]);
 
   useEffect(() => {
@@ -75,6 +120,26 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
 
   const frame = useMemo(() => interpolate(replay?.keyframes ?? [], progress), [replay, progress]);
   const atFullTime = progress >= 0.999;
+  const hasReplay = !!replay && replay.keyframes.length > 1;
+
+  // Live-adjusted markets: where a market declares `liveSeriesId` AND the current replay frame has a
+  // matching series value, drive its displayed YES/NO odds off the replay instead of the static
+  // snapshot fetched once at catalog load — this is the actual "watch the odds update while you bet"
+  // wiring. Markets without a matching live series (modeled priors, combos, batch) stay static and
+  // honestly labeled as such; nothing is fabricated.
+  const liveAdjust = (m: Market): Market => {
+    if (!m.liveSeriesId) return m;
+    const v = frame.series[m.liveSeriesId];
+    if (v == null) return m;
+    const yes = Math.max(0.1, Math.min(99.9, v));
+    return { ...m, fairYesPct: yes, fairNoPct: 100 - yes };
+  };
+  const rawMarkets = catalog?.categories[cat] ?? [];
+  const marketsForDisplay = rawMarkets.map(liveAdjust);
+  const isLiveDriven = (m: Market) => !!m.liveSeriesId && frame.series[m.liveSeriesId] != null;
+
+  const sideFor = (id: string) => ticket.find((l) => l.market.id === id)?.side;
+  const pick = (m: Market, side: boolean) => addLeg(liveAdjust(m), side);
 
   const settleables: Market[] = catalog ? [...catalog.categories.outcomes.filter((m) => m.settleable), ...catalog.categories.combos, ...catalog.categories.batch] : [];
 
@@ -92,90 +157,134 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
     flash("All full-time markets settled on-chain");
   }
 
-  if (!replay) return <div className="empty-state">Loading the semifinal replay…</div>;
+  const jumpToReplay = () => document.getElementById("replay-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
-    <div className="theater">
-      {/* scoreboard */}
-      <div className="card panel scoreboard">
-        <div className="sb-team">
-          <Flag code={replay.homeCode} team={replay.home} />
-          <span className="name display" style={{ fontSize: "var(--pp-text-lg)" }}>{replay.home}</span>
-        </div>
-        <div>
-          <div className="sb-score">{frame.score.home}–{frame.score.away}</div>
-          <div className="sb-clock">{atFullTime ? "FULL TIME" : <><span style={{ marginRight: 6 }}>●</span>{frame.minuteLabel} {frame.matchPhase && frame.matchPhase !== "HT" ? `· ${MATCH_PHASE_LABEL[frame.matchPhase]}` : ""}</>}</div>
-        </div>
-        <div className="sb-team away">
-          <span className="name display" style={{ fontSize: "var(--pp-text-lg)" }}>{replay.away}</span>
-          <Flag code={replay.awayCode} team={replay.away} />
-        </div>
-      </div>
+    <div className="grid-main">
+      <div className="theater">
+        <FixturePicker fixtures={fixtures} activeFixtureId={activeFixtureId} demoFixtureId={demoFixtureId} onSelectFixture={onSelectFixture} />
 
-      {/* transport */}
-      <div className="card">
-        <div className="transport">
-          <button className="btn ghost" onClick={() => { if (atFullTime) { setProgress(0); setPlaying(true); } else setPlaying((p) => !p); }} aria-label={playing ? "Pause" : "Play"}>
-            {atFullTime ? <IconReplay size={16} /> : playing ? <IconPause size={16} /> : <IconPlay size={16} />}
-            {atFullTime ? "Replay" : playing ? "Pause" : "Play"}
-          </button>
-          <div className="scrub" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setProgress(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); }}>
-            <div className="fill" style={{ width: `${progress * 100}%` }} />
-          </div>
-          <div className="speed-group">
-            {SPEEDS.map((s) => <button key={s} className={`speed ${speed === s ? "active" : ""}`} onClick={() => setSpeed(s)}>{s}×</button>)}
-          </div>
-        </div>
-        <ReplayChart kfs={replay.keyframes} seriesDefs={replay.seriesDefs} phaseBands={replay.phaseBands} progress={progress} />
-      </div>
-
-      {/* market ticker */}
-      <div className="card">
-        <div className="section-head" style={{ margin: "0 0 var(--pp-space-3)" }}>
-          <h2 style={{ fontSize: "var(--pp-text-md)" }}>Full-time markets</h2>
-          <span className="kicker">settle by TxLINE proof</span>
-        </div>
-        <div className="chips">
-          {settleables.map((m) => {
-            const s = settlements[m.id];
-            return (
-              <div key={m.id} className={`chip ${s ? "settled" : ""}`}>
-                <span className="cn">{m.title} <span className="mono faint">{m.generation}</span></span>
-                <span className="cv" style={{ color: s ? (s.result.outcome ? "var(--pp-color-yes)" : "var(--pp-color-no)") : "var(--pp-color-text)" }}>
-                  {s ? (s.result.winningSide) : `${m.fairYesPct.toFixed(0)}% fair`}
-                </span>
-                {s && <button className="tiny txlink" onClick={() => onOpenReceipt(m.id)}>proof receipt →</button>}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* settlement climax */}
-      <div className="card panel" style={{ borderColor: atFullTime ? "color-mix(in srgb, var(--pp-color-verified) 40%, var(--pp-color-border))" : undefined }}>
-        <div className="row spread wrap">
-          <div className="row" style={{ gap: 10 }}>
-            <IconBolt size={18} />
-            <div>
-              <strong>Keeper settlement</strong>
-              <div className="tiny muted">On full time the keeper fetches TxLINE proofs and settles every market in one CPI each — V1, V3 multiproof, V3 derived.</div>
+        <div id="replay-section">
+          {!hasReplay ? (
+            <div className="card hero">
+              {active ? (
+                <>
+                  <div className="hero-head">
+                    <span className="muted tiny">{active.competition || "World Cup"}</span>
+                    <span className="grow" />
+                    {replayLoading && <span className="pill tiny">loading replay…</span>}
+                  </div>
+                  <div className="hero-teams">
+                    <div className="team"><Flag code={active.homeCode} team={active.home} /><span className="name">{active.home}</span></div>
+                    <span className="scoreline">{active.score ? `${active.score.home}–${active.score.away}` : "vs"}</span>
+                    <div className="team"><span className="name">{active.away}</span><Flag code={active.awayCode} team={active.away} /></div>
+                  </div>
+                  <p className="muted" style={{ fontSize: "var(--pp-text-sm)" }}>
+                    {replayLoading ? "Loading tick history for this match…" : "This match hasn't been played yet — no tick history to replay. Prices below are still real, de-margined quotes."}
+                  </p>
+                </>
+              ) : (
+                <div className="muted">Loading match…</div>
+              )}
             </div>
-          </div>
-          <button className="btn primary" disabled={!atFullTime || settling} onClick={settleAll}>
-            {settling ? <><span className="spinner" /> settling…</> : <>Settle full-time markets</>}
-          </button>
+          ) : (
+            <>
+              {/* scoreboard */}
+              <div className="card panel scoreboard">
+                <div className="sb-team">
+                  <Flag code={replay!.homeCode} team={replay!.home} />
+                  <span className="name display" style={{ fontSize: "var(--pp-text-lg)" }}>{replay!.home}</span>
+                </div>
+                <div>
+                  <div className="sb-score">{frame.score.home}–{frame.score.away}</div>
+                  <div className="sb-clock">{atFullTime ? "FULL TIME" : <><span style={{ marginRight: 6 }}>●</span>{frame.minuteLabel} {frame.matchPhase && frame.matchPhase !== "HT" ? `· ${MATCH_PHASE_LABEL[frame.matchPhase]}` : ""}</>}</div>
+                </div>
+                <div className="sb-team away">
+                  <span className="name display" style={{ fontSize: "var(--pp-text-lg)" }}>{replay!.away}</span>
+                  <Flag code={replay!.awayCode} team={replay!.away} />
+                </div>
+              </div>
+
+              {/* transport — playback controls up top, driving both the chart AND the market odds below */}
+              <div className="card">
+                <div className="transport">
+                  <button className="btn ghost" onClick={() => { if (atFullTime) { setProgress(0); setPlaying(true); } else setPlaying((p) => !p); }} aria-label={playing ? "Pause" : "Play"}>
+                    {atFullTime ? <IconReplay size={16} /> : playing ? <IconPause size={16} /> : <IconPlay size={16} />}
+                    {atFullTime ? "Replay" : playing ? "Pause" : "Play"}
+                  </button>
+                  <div className="scrub" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setProgress(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); }}>
+                    <div className="fill" style={{ width: `${progress * 100}%` }} />
+                  </div>
+                  <div className="speed-group">
+                    {SPEEDS.map((s) => <button key={s} className={`speed ${speed === s ? "active" : ""}`} onClick={() => setSpeed(s)}>{s}×</button>)}
+                  </div>
+                </div>
+                <ReplayChart kfs={replay!.keyframes} seriesDefs={replay!.seriesDefs} phaseBands={replay!.phaseBands} progress={progress} />
+                <p className="tiny faint" style={{ marginTop: 8 }}>
+                  {isDemo ? "Odds below update live as you scrub — place a bet while you watch them move." : "Real de-margined replay for this fixture. Settlement proofs are only recorded for the demo semifinal."}
+                </p>
+              </div>
+            </>
+          )}
         </div>
-        {!atFullTime && <div className="tiny faint" style={{ marginTop: 8 }}>Play to full time to arm settlement.</div>}
-        {Object.keys(settlements).length > 0 && (
-          <div className="stack" style={{ marginTop: "var(--pp-space-3)", gap: 4 }}>
-            {Object.values(settlements).map((s) => (
-              <SettlementSteps key={s.result.marketId} settled={s} health={health} onOpenReceipt={onOpenReceipt} />
-            ))}
+
+        {/* markets */}
+        <div className="section-head">
+          <h2>Markets</h2>
+          <span className="kicker">{CATS.find((c) => c.key === cat)?.blurb}</span>
+        </div>
+        <p className="muted" style={{ fontSize: "var(--pp-text-sm)", margin: "0 0 var(--pp-space-3)" }}>
+          {CATS.find((c) => c.key === cat)?.plain}
+        </p>
+        <div className="cat-tabs">
+          {CATS.map((c) => (
+            <button key={c.key} className={`cat-tab ${cat === c.key ? "active" : ""}`} onClick={() => setCat(c.key)} title={c.plain}>
+              {c.label} <span className="mono tiny faint">{catalog?.categories[c.key]?.length ?? 0}</span>
+            </button>
+          ))}
+        </div>
+        <div className="stack">
+          {catalogLoading && <div className="card muted">Loading markets for this fixture…</div>}
+          {!catalogLoading && marketsForDisplay.length === 0 && <div className="card muted">No markets for this fixture yet.</div>}
+          {!catalogLoading && marketsForDisplay.map((m) => (
+            <MarketCard key={m.id} market={m} selectedSide={sideFor(m.id)} onPick={(side) => pick(m, side)} live={isLiveDriven(m)} />
+          ))}
+        </div>
+
+        {/* settlement — only a live affordance where a proof is actually recorded (never a dead button) */}
+        {settleables.length > 0 ? (
+          <div className="card panel" style={{ borderColor: atFullTime ? "color-mix(in srgb, var(--pp-color-verified) 40%, var(--pp-color-border))" : undefined }}>
+            <div className="row spread wrap">
+              <div className="row" style={{ gap: 10 }}>
+                <IconBolt size={18} />
+                <div>
+                  <strong>Keeper settlement</strong>
+                  <div className="tiny muted">On full time the keeper fetches TxLINE proofs and settles every market in one CPI each — V1, V2, V3.</div>
+                </div>
+              </div>
+              <button className="btn primary" disabled={!hasReplay || !atFullTime || settling} onClick={settleAll}>
+                {settling ? <><span className="spinner" /> settling…</> : <>Settle full-time markets</>}
+              </button>
+            </div>
+            {hasReplay && !atFullTime && <div className="tiny faint" style={{ marginTop: 8 }}>Play to full time to arm settlement.</div>}
+            {Object.keys(settlements).length > 0 && (
+              <div className="stack" style={{ marginTop: "var(--pp-space-3)", gap: 4 }}>
+                {Object.values(settlements).map((s) => (
+                  <SettlementSteps key={s.result.marketId} settled={s} health={health} onOpenReceipt={onOpenReceipt} />
+                ))}
+              </div>
+            )}
           </div>
+        ) : (
+          active && (
+            <div className="card muted tiny">Settlement proofs are only recorded for the demo semifinal — pick England v Argentina above to watch a market settle on-chain.</div>
+          )
         )}
+
+        {catalog && settleables.length > 0 && <WalletSettlementPanel catalog={catalog} atFullTime={atFullTime} health={health} flash={flash} />}
       </div>
 
-      {catalog && <WalletSettlementPanel catalog={catalog} atFullTime={atFullTime} health={health} flash={flash} />}
+      <TicketBuilder ticket={ticket} removeLeg={removeLeg} onOpenReplay={jumpToReplay} />
     </div>
   );
 }
