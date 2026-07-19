@@ -11,6 +11,27 @@ import {
 } from "./chain.js";
 import { describeError } from "./errors.js";
 
+/**
+ * Crash guard (Night 3 P0 — found while probing V2/V3 devnet settlement). The public devnet RPC
+ * (api.devnet.solana.com) rate-limits hard under any burst of requests — reproduced live: a single
+ * settleMarket() call fires 3 concurrent fundGas() + 2 concurrent fundTokens() transactions, and under
+ * load @solana/web3.js's internal retry-on-429 client eventually gives up and throws from a timer
+ * callback OUTSIDE the request's own promise chain — so it never reaches `wrap()`'s `.catch(next)` and
+ * instead surfaces as a bare Node "unhandledRejection" / "uncaughtException" that (by Node's default
+ * since v15) KILLS THE ENTIRE PROCESS. A keeper that dies mid-demo because Solana's public devnet RPC
+ * briefly rate-limited it is far worse than one that logs a failed request and stays up — every route
+ * handler here is stateless per-request (no in-memory transaction state that a stray exception could
+ * leave corrupted beyond the one request that touched it), so staying alive is the right trade. This is
+ * NOT a fix for the rate limit itself (that's an external RPC's behavior, out of this app's control) —
+ * it's the correct posture for a server whose dependency can throw outside its own request lifecycle.
+ */
+process.on("unhandledRejection", (reason) => {
+  console.error("[keeper] unhandledRejection (process staying up):", (reason as Error)?.message ?? reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[keeper] uncaughtException (process staying up):", err?.message ?? err);
+});
+
 const app = express();
 app.use(cors());
 app.use(express.json());

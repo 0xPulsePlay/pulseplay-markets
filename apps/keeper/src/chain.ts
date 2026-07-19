@@ -50,20 +50,46 @@ const dailyScoresRootsPdaFromTimestamp = (oracleProgram: anchor.web3.PublicKey, 
 };
 
 /**
- * Fetch a REAL, live V1 stat-validation proof directly from TxLINE's devnet API (NOT the local engine,
+ * Fetch a REAL, live stat-validation proof directly from TxLINE's devnet API (NOT the local engine,
  * which only proxies mainnet — see docs/TXLINE-INTEGRATION.md "Devnet"). Returns null (falls back to
  * the recorded fixture) on anything but a clean match — cluster != devnet, no cached devnet token,
  * network hiccup, or a stat shape that doesn't match what the market expects.
+ *
+ * Night 3: extended beyond V1 to V2/V3 after probing the raw upstream API directly (BLOCKED.md §5's
+ * open question). Confirmed live, real data, matching the recorded fixtures' values exactly:
+ *   - V1: `GET /api/scores/stat-validation?...&statKey=<n>` → singular `statToProve`/`statProof`.
+ *   - V2: `GET /api/scores/stat-validation?...&statKeys=1,2,3` (comma-separated, note the PLURAL param
+ *     name `statKeys` — different from V1's singular `statKey`) → plural `statsToProve[]`/`statProofs[]`,
+ *     the exact shape `comboArgs()` consumes.
+ *   - V3: `GET /api/scores/stat-validation-v3?...&statKeys=7,8` → `statsToProve[{stat,statProof}]` +
+ *     `multiproof`, the exact shape `ticketArgs()` consumes. This was assumed unavailable live (see
+ *     docs/TXLINE-INTEGRATION.md API-feedback #2, which is true of the LOCAL ENGINE's `/v1` proxy) but
+ *     the raw upstream devnet endpoint serves it directly.
  */
-async function liveDevnetProof(statKey: number, period: number): Promise<any | null> {
+export async function liveDevnetProof(m: Market): Promise<any | null> {
   if (CONFIG.cluster !== "devnet") return null;
   try {
     const { apiToken, jwt } = loadJson(CONFIG.devnetTokenCachePath);
-    const url = `${CONFIG.devnetTxlineApiBase}/api/scores/stat-validation?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKey=${statKey}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken } });
+    const headers = { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken };
+    if (m.generation === "V1") {
+      const url = `${CONFIG.devnetTxlineApiBase}/api/scores/stat-validation?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKey=${m.statKey}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) return null;
+      const p: any = await res.json();
+      if (p?.statToProve?.key !== m.statKey || p?.statToProve?.period !== m.period) return null;
+      return p;
+    }
+    const keys = m.liveStatKeys;
+    if (!keys || keys.length === 0) return null; // no declared key set -> can't build the live query, stay on the recorded fixture
+    const endpoint = m.generation === "V2" ? "stat-validation" : "stat-validation-v3";
+    const url = `${CONFIG.devnetTxlineApiBase}/api/scores/${endpoint}?fixtureId=${CONFIG.demoFixtureId}&seq=${DEMO_SEQ}&statKeys=${keys.join(",")}`;
+    const res = await fetch(url, { headers });
     if (!res.ok) return null;
     const p: any = await res.json();
-    if (p?.statToProve?.key !== statKey || p?.statToProve?.period !== period) return null;
+    if (!Array.isArray(p?.statsToProve)) return null;
+    const keyOf = (s: any) => (m.generation === "V2" ? s.key : s.stat?.key);
+    if (!keys.every((k: number) => p.statsToProve.some((s: any) => keyOf(s) === k))) return null;
+    if (m.generation === "V3" && !p?.multiproof) return null;
     return p;
   } catch {
     return null; // devnet token not obtained yet, or the API is unreachable — recorded fixture covers us
@@ -415,14 +441,14 @@ export async function walletBalances(walletB58: string): Promise<WalletBalances>
 
 /** Run the full trustless lifecycle for a market on-chain. Idempotent-ish: re-runs with a fresh authority. */
 /**
- * The market's settlement proof: a LIVE devnet proof for V1 markets when available (confirmed working
- * — see docs/TXLINE-INTEGRATION.md "Devnet"), else the recorded fixture. Shared by settleMarket() and
+ * The market's settlement proof: a LIVE devnet proof when available (V1/V2/V3 all confirmed working —
+ * see docs/TXLINE-INTEGRATION.md "Devnet"), else the recorded fixture. Shared by settleMarket() and
  * resolveWalletMarket() so both settlement paths use identically-sourced proofs.
  */
 async function fetchSettlementProof(m: Market): Promise<{ proof: any; live: boolean }> {
-  const live = m.generation === "V1" ? await liveDevnetProof(m.statKey, m.period) : null;
+  const live = await liveDevnetProof(m);
   const proof = live ?? (loadJson(join(FIXDIR, m.fixtureProofFile)).proof
-    ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1 recorded files wrap under .proof
+    ? loadJson(join(FIXDIR, m.fixtureProofFile)).proof // V1/V2 recorded files wrap under .proof
     : loadJson(join(FIXDIR, m.fixtureProofFile))); // V3 files are bare
   return { proof, live: !!live };
 }
@@ -431,17 +457,24 @@ async function fetchSettlementProof(m: Market): Promise<{ proof: any; live: bool
  *  on-chain (no signer beyond the fee payer — the proof itself is the authority), so the keeper's own
  *  wallet can resolve ANY market, including one a connected wallet deposited into. */
 async function resolveOnChain(prog: any, market: anchor.web3.PublicKey, m: Market, proof: any, live: boolean): Promise<string> {
-  const dailyPda = live ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp) : dailyScoresRootsPda();
+  // devnet has no single fixed daily_scores_roots PDA (it's per-epoch-day) — ANY devnet resolve, live
+  // proof or recorded-fixture fallback, must compute the PDA from the proof's own anchored timestamp.
+  // Previously this only branched on `live`, so a recorded-fixture fallback for V2/V3 on devnet crashed
+  // with "no fixed daily_scores_roots PDA configured" instead of attempting (and, if the anchored data
+  // genuinely differs, failing closed on) the correct per-timestamp account.
+  const dailyPda = (live || CONFIG.cluster === "devnet")
+    ? dailyScoresRootsPdaFromTimestamp(ORACLE, proof.summary.updateStats.minTimestamp)
+    : dailyScoresRootsPda();
   const cu = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
   if (m.generation === "V1") {
     return prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
       .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else if (m.generation === "V2") {
     return prog.methods.resolveCombo(comboArgs(proof))
-      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   }
   return prog.methods.resolveTicket(ticketArgs(proof))
-    .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+    .accounts({ market, dailyScoresRoots: dailyPda, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
 }
 
 export interface ResolveWalletMarketResult {

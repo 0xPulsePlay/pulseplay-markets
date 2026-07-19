@@ -1,0 +1,9 @@
+{
+  "network": "devnet",
+  "apiBase": "https://txline-dev.txodds.com",
+  "apiToken": "test-fixture-api-token",
+  "jwt": "test-fixture-jwt",
+  "serviceLevelId": 1,
+  "weeks": 1,
+  "obtainedAt": "2026-07-19T00:00:00.000Z"
+}

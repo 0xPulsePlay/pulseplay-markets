@@ -48,6 +48,11 @@ export interface Market {
   legs?: Leg[];
   lmsr?: { b: number; openPrices: number[]; maxLossBinary: number; outcomes: string[] };
   settlementNote: string;
+  /** V2/V3 only: the full set of stat keys this market's proof covers (the recorded fixture's own
+   *  `statKeys` list). Night 3: lets chain.ts fetch a LIVE multi-stat/multiproof from TxLINE's raw
+   *  devnet API (`?statKeys=1,2,3`) instead of only ever using the recorded (mainnet-clone-bound)
+   *  fixture — see docs/TXLINE-INTEGRATION.md "Devnet". Absent for V1 (single statKey suffices). */
+  liveStatKeys?: number[];
 }
 
 const oddsCache = new Map<string, any>();
@@ -146,6 +151,7 @@ export async function buildCatalog(fixtureId: number = CONFIG.demoFixtureId): Pr
     predicateLabel: `${home} goals==1, ${away} goals==2, both booked — one indexed strategy covering every leg`,
     statKey: 1, period: 5, comparison: 2, threshold: 1, combineOp: 0, kind: 1,
     fixtureProofFile: "scores-proof-v2-18241006-keys1-2-3.json", expectedOutcome: true, isDemoFixture,
+    liveStatKeys: [1, 2, 3],
     settlementNote: isDemoFixture
       ? "validate_stat_v2 indexed strategy: every requested stat covered exactly once by a discrete predicate; ONE CPI settles the whole same-match ticket atomically. Each leg carries its own membership path (no shared multiproof — that's V3's job for batches)."
       : "Settles via a V2 indexed-strategy CPI once proofs are recorded for this fixture — priced here, not yet settleable in this demo.",
@@ -157,6 +163,7 @@ export async function buildCatalog(fixtureId: number = CONFIG.demoFixtureId): Pr
     subtitle: "Mega-ticket · V3 multiproof · derived binary",
     statKey: 7, period: 5, comparison: 2, threshold: -5, combineOp: 2, kind: 2,
     fixtureProofFile: "scores-proof-v3-18241006-keys7-8.json", expectedOutcome: true, isDemoFixture,
+    liveStatKeys: [7, 8],
     settlementNote: isDemoFixture
       ? "Cross-period legs settle in ONE V3 multiproof CPI. Here a binary predicate: home corners (1) − away corners (6) == −5 → YES."
       : "Settles via a V3 multiproof CPI once proofs are recorded for this fixture — priced here, not yet settleable in this demo.",
@@ -184,7 +191,7 @@ async function materialize(d: Def, settleable: boolean): Promise<Market> {
   };
 }
 
-function comboMarket(id: string, title: string, legs: Leg[], meta: { predicateLabel: string; statKey: number; period: number; comparison: number; threshold: number; combineOp: number; kind: number; fixtureProofFile: string; expectedOutcome: boolean; settlementNote: string; isDemoFixture: boolean }): Market {
+function comboMarket(id: string, title: string, legs: Leg[], meta: { predicateLabel: string; statKey: number; period: number; comparison: number; threshold: number; combineOp: number; kind: number; fixtureProofFile: string; expectedOutcome: boolean; settlementNote: string; isDemoFixture: boolean; liveStatKeys?: number[] }): Market {
   const parlayLegs: ParlayLeg[] = legs.map((l) => ({ p: l.fairPct / 100, margin: l.margin, label: l.label }));
   const cmp = compareParlay(parlayLegs, 100, legs.slice(1).map(() => 0.3));
   const fairYesPct = (cmp.fairProbCorrelated ?? cmp.fairProbIndependent) * 100;
@@ -194,11 +201,11 @@ function comboMarket(id: string, title: string, legs: Leg[], meta: { predicateLa
     fixtureProofFile: meta.fixtureProofFile, settleable: meta.isDemoFixture, expectedOutcome: meta.expectedOutcome, pricingSource: "de-margined",
     fairYesPct, fairNoPct: 100 - fairYesPct, bookYesPct: fairYesPct,
     fairYesOdds: cmp.fairOdds, bookYesOdds: cmp.bookOdds, marginTaxPct: cmp.marginTax * 100,
-    legs, settlementNote: meta.settlementNote,
+    legs, settlementNote: meta.settlementNote, liveStatKeys: meta.liveStatKeys,
   };
 }
 
-function derivedMarket(id: string, title: string, meta: { predicateLabel: string; subtitle: string; statKey: number; period: number; comparison: number; threshold: number; combineOp: number; kind: number; fixtureProofFile: string; expectedOutcome: boolean; settlementNote: string; fairYesPct: number; margin: number; isDemoFixture: boolean }): Market {
+function derivedMarket(id: string, title: string, meta: { predicateLabel: string; subtitle: string; statKey: number; period: number; comparison: number; threshold: number; combineOp: number; kind: number; fixtureProofFile: string; expectedOutcome: boolean; settlementNote: string; fairYesPct: number; margin: number; isDemoFixture: boolean; liveStatKeys?: number[] }): Market {
   const fair = meta.fairYesPct / 100;
   return {
     id, category: "batch", kind: meta.kind, title, subtitle: meta.subtitle, predicateLabel: meta.predicateLabel,
@@ -208,6 +215,6 @@ function derivedMarket(id: string, title: string, meta: { predicateLabel: string
     bookYesPct: Math.min(99.5, meta.fairYesPct * (1 + meta.margin)),
     fairYesOdds: fairDecimalOdds(fair), bookYesOdds: bookDecimalOdds(fair, meta.margin),
     marginTaxPct: (1 - 1 / (1 + meta.margin)) * 100,
-    settlementNote: meta.settlementNote,
+    settlementNote: meta.settlementNote, liveStatKeys: meta.liveStatKeys,
   };
 }
