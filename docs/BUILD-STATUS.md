@@ -100,3 +100,96 @@ green match preserved). Screenshots 10-mobile-storefront, 11-mobile-replay added
   → program id `2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin`.
 - V3 proofs are NOT served by local `/v1`; the V3 settlement demo uses recorded fixtures in
   `onchain/fixtures/` + local validator (per engine brief §7.4 / §11).
+
+---
+
+# Night 2 — devnet + USDC + demo-navigability (2026-07-19)
+
+Mikail's hands-on review of `d064b84` found the build technically correct but not demo-navigable.
+Brief: devnet deploy, a real devnet USDC-like SPL token for escrow, a real fixture picker, wallet
+connect + on-chain ticket submission, a richer replay chart, and a judge-ready demo script.
+Acceptance criteria authored up front (2026-07-19 08:5x UTC) — PASS/PENDING table below, never weakened.
+
+_Branch note (this worktree, `worktree-agent-a07b1191953fcbb5f`): branched off `main` at `d064b84`,
+**before** Phase 0/1 (devnet deploy, SPL-token escrow) landed on the sibling worktree
+(`worktree-agent-a7f8aedd349925f2f`) and before this Night-2 section was authored there. This worktree
+was scoped ONLY to **Phase 4 — replay chart overhaul** (see task boundaries) and does not contain
+Phase 0/1/2/3/5 work — those checkboxes below are carried over unweakened from the sibling worktree's
+authored criteria for completeness, but reflect ITS state, not this branch's. Phase 4 is this branch's
+own verified work, marked below with this worktree's own evidence. Reconciling both worktrees onto a
+single `main` is an orchestration step outside this session's scope._
+
+## Acceptance criteria
+
+**Phase 0 — devnet baseline** — see sibling worktree `worktree-agent-a7f8aedd349925f2f` (not in this branch)
+
+**Phase 1 — USDC devnet wagering token** — see sibling worktree `worktree-agent-a7f8aedd349925f2f` (not in this branch)
+
+**Phase 2 — fixture picker / navigation** — owned by a concurrent sibling agent, not this worktree
+- [ ] P2.1 `GET /api/catalog` (+ replay) accepts `fixtureId` query param, defaults preserved
+- [ ] P2.2 fixtures list is genuinely clickable — picking a fixture scopes the storefront to it
+- [ ] P2.3 flag coverage noted (lower priority; extend only if time allows)
+- [ ] P2.4 copy/clarity pass on Storefront + MarketCard — plain-language one-liner per category
+
+**Phase 3 — wallet connect + real ticket submission + visible settlement** — not this worktree
+- [ ] P3.1 Phantom wallet-connect (`window.phantom.solana`), `@solana/web3.js` + SPL token client deps added to web
+- [ ] P3.2 TicketBuilder gets a real terminal action: connected wallet signs+submits a client-side deposit tx into the market vault, cluster-aware, shows confirmed signature
+- [ ] P3.3 "Fund my wallet" faucet action (devnet SOL for gas + devnet USDC for stakes)
+- [ ] P3.4 settlement visualization: vault YES/NO balances, wallet balance before/after, step-by-step CPI lifecycle indicator, every signature a real explorer link
+
+**Phase 4 — replay chart overhaul** — **this worktree's work, DONE, all green**
+- [x] P4.1 `buildReplay()` pulls odds ticks for markets actually relevant to the catalog, not just 1X2  **PASS**
+- [x] P4.2 each market its own labeled line/series with a legend  **PASS**
+- [x] P4.3 visual HT/2H/ET/stoppage bands + separated pre-match segment  **PASS**
+- [x] P4.4 no regression on cinematic continuous rendering at fast-forward (explicitly tested)  **PASS**
+
+_Evidence (apps/keeper/src/engine.ts, apps/keeper/test/engine.test.ts, apps/web/src/views/ReplayTheater.tsx):_
+- _P4.1: `buildReplay()` now pulls `1X2_PARTICIPANT_RESULT` (win-prob) + `OVERUNDER_PARTICIPANT_GOALS`
+  over/line=0.5 (the exact line `catalog.ts`'s "England to score" reuses). Verified via
+  `GET /v1/fixtures/18241006/markets` that these are the ONLY two markets with real ticks the catalog
+  actually prices off for this fixture (BOTH_TEAMS_TO_SCORE / DOUBLE_CHANCE / HANDICAP_RESULT /
+  CORRECT_SCORE / OVERUNDER_PARTICIPANT_CORNERS / ASIAN_HANDICAP all returned 0 series rows) — nothing
+  fabricated for markets with zero ticks; `eng-exact-1`/`red-card` stay deliberately unplotted (they're
+  "modeled" pricing, not live series, in the catalog itself)._
+- _P4.2: `ReplayData.seriesDefs` (4 entries: England win / Draw / Argentina win / Over 0.5 match goals)
+  each render as their own labeled `<path>` + legend chip with a live % readout, using the existing
+  PulsePlay graph palette (`--pp-graph-*` tokens). Verified live via `/api/fixtures/18241006/replay` and
+  Playwright screenshot (legend text: "ENGLAND WIN 0% · DRAW 3% · ARGENTINA WIN 96% · OVER 0.5 MATCH
+  GOALS 52%" at full time)._
+- _P4.3: `buildPhaseBands()` derives Pre-match/1st Half/Half-time/2nd Half/Stoppage/Full-Time bands
+  straight from the fixture's real `timeline.phases` wall-clock boundaries (not from keyframe survival,
+  which stays robust under dedup). Live-verified bands for fixture 18241006: pre-match 0→5%, H1 5→35%,
+  stoppage 35→37%, HT 37→47%, H2 47→77%, stoppage 77→87%, full-time 87→100% — H1 stoppage (~2:53) and H2
+  stoppage (~11:11, since this match ran deep into added time) render as distinctly different widths, as
+  they should. Pre-match renders as a dashed, muted lead-in (bridged into the solid live line at
+  kickoff) — "label reality everywhere": it visually reads as "not live yet," not fabricated data._
+- _P4.4: Playwright-verified at 12× — screenshots at ~21/43/65/86/100% progress during a live 12× run
+  all show crisp, fully-legible 4-series lines with no compression/mush; progress advances linearly
+  (~500ms per ~21% step, matching BASE_MS=30000/12=2500ms total), confirming the RAF/interpolate() path
+  is unchanged and the match-clock display stays honest through stoppage ("100:25 · Stoppage" shown
+  mid-run). 0 console/page errors across the full journey (load → scrub 0/50/100% → 12× playback →
+  full-time). Also verified no mobile horizontal overflow at 390px with the new 4-item legend
+  (scrollWidth === clientWidth === 390)._
+- _Unit tests: 37/37 green (`pnpm --filter @pulseplay/keeper test`) — `computeMatchPhase`,
+  `buildPhaseBands`, `makeTMap`, `build1x2Series`, `buildLineSeries`, `nearestValue`, and
+  `assembleKeyframes` (the network-free multi-series + phase composition seam), all driven by
+  fixture-18241006-shaped recorded data (real timeline.phases + real clock/statusLabel readings pulled
+  live during development). Two real live-data bugs were found and fixed while runtime-verifying against
+  the actual engine (not caught by the hand-authored hermetic fixtures, since those fixtures were
+  necessarily "idealized"): (1) the engine's nearest-seq-to-ts state lookup sometimes lands on a
+  non-match-state administrative tick (statusLabel `"?"`, clock sometimes entirely absent) even
+  mid-match — was rendering as a fabricated "stoppage" blip and a momentary 00:00 clock reset;
+  `computeMatchPhase()` now takes a `fallback` param and `assembleKeyframes()` carries forward the last
+  known phase/clock instead. (2) the very last sample, queried exactly at the FINAL phase's `wallEnd`,
+  lands on a bare stream "disconnected" marker one ms after the real FINAL state — fixed by querying
+  `endTs - 1` for that one sample while still recording it at the true `endTs` so `t` stays exactly 1.
+  Both are logged with root cause + fix in `docs/TXLINE-INTEGRATION.md`'s API-feedback list._
+
+**Phase 5 — demo script + docs** — not this worktree
+- [ ] P5.1 `docs/DEMO-PLAN.md` — beat-by-beat ≤5min walkthrough with a fallback per beat
+- [ ] P5.2 `STATUS-FOR-MIKAIL.md` + `docs/BUILD-STATUS.md` reflect actual final state
+- [ ] P5.3 final `BLOCKED.md` pass, honest and matching existing rigor
+
+## PASS/PENDING table (Night 2)
+_Phase 4 is fully green in this worktree (`worktree-agent-a07b1191953fcbb5f`), evidence above. Phases
+0/1/2/3/5 are scoped to other worktrees/sessions — see the branch note above._
