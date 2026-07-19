@@ -516,21 +516,34 @@ export async function resolveWalletMarket(walletB58: string, m: Market): Promise
   };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function settleMarket(m: Market): Promise<SettleResult> {
   const prog = program();
   const conn = _conn!;
   const mint = await wagerMint();
-  // V1 (Outcomes) on devnet: try a LIVE proof straight from TxLINE's devnet API first — confirmed
-  // working (see docs/TXLINE-INTEGRATION.md "Devnet"). Falls back to the recorded fixture for V2/V3
-  // (not yet confirmed live) or if the live fetch fails for any reason (offline, no cached token, …).
+  // V1/V2/V3 all try a LIVE proof straight from TxLINE's devnet API first — confirmed working for every
+  // generation (see docs/TXLINE-INTEGRATION.md "Devnet"). Falls back to the recorded fixture if the live
+  // fetch fails for any reason (offline, no cached token, stat shape mismatch, …).
   const { proof, live } = await fetchSettlementProof(m);
   const authority = Keypair.generate();
   const yesBettor = Keypair.generate();
   const noBettor = Keypair.generate();
   // SOL covers rent + gas only now; stakes move in the SPL wager token.
-  await Promise.all([fundGas(conn, authority.publicKey, 0.05), fundGas(conn, yesBettor.publicKey, 0.05), fundGas(conn, noBettor.publicKey, 0.05)]);
+  // SEQUENTIAL, not Promise.all: the public devnet RPC (api.devnet.solana.com) rate-limits hard under
+  // any burst of concurrent requests — reproduced live during a "Settle full-time markets" run (6
+  // markets, this function called once per market): running these 3 fundGas + 2 fundTokens calls in
+  // parallel tripped persistent 429s, and 5 of the 6 markets never finished settling (only the FIRST one,
+  // which won the race before the rate limiter kicked in, completed). The server itself survived (see the
+  // crash-guard note on server.ts's unhandledRejection handler), but a demo where "Settle full-time
+  // markets" silently only settles 1 of 6 is not acceptable. Trading a few seconds of extra wall-clock
+  // time for reliability is the right call for a live demo on a public, rate-limited RPC.
+  await fundGas(conn, authority.publicKey, 0.05);
+  await fundGas(conn, yesBettor.publicKey, 0.05);
+  await fundGas(conn, noBettor.publicKey, 0.05);
   const oneToken = 10 ** CONFIG.wagerMintDecimals;
-  await Promise.all([fundTokens(yesBettor.publicKey, 5 * oneToken), fundTokens(noBettor.publicKey, 5 * oneToken)]);
+  await fundTokens(yesBettor.publicKey, 5 * oneToken);
+  await fundTokens(noBettor.publicKey, 5 * oneToken);
 
   const [market] = PublicKey.findProgramAddressSync(
     [Buffer.from("market"), authority.publicKey.toBuffer(), i64le(CONFIG.demoFixtureId), u32le(m.statKey), i32le(m.period)], prog.programId);
