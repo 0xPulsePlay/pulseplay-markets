@@ -50,3 +50,44 @@ sentinel** so occurrence markets settle both sides; the full tick corpus makes t
    reference program. Worth a line in the crate README.
 8. **`verify=1` calls mainnet RPC** and can be slow/rate-limited; we cache validation responses per stat
    for the receipt view.
+
+## Devnet (Night 2, 2026-07-19)
+
+The local engine (`ENGINE_URL=http://localhost:3001`) only proxies **mainnet** TxLINE — it has no devnet
+mode. Devnet data/proofs are fetched by calling **`https://txline-dev.txodds.com` directly** (a
+different, RAW upstream REST surface — `/api/scores/...`, `/api/fixtures/...` — not the aggregated
+`/v1/...` shape the local engine exposes). Every devnet-facing call needs BOTH headers:
+`Authorization: Bearer <short-lived guest JWT>` and `X-Api-Token: <long-lived apiToken>`.
+
+**Token chase — succeeded.** `apps/keeper/scripts/get-devnet-token.mjs` dry-runs then (on a clean
+dry-run) really runs the subscribe→activate flow against the devnet program
+`6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`, using the devnet TxL mint
+`4Zao8ocPhmMgq7PdsYWyxvqySMGx7xb9cMftPMkEokRG` (NOT the mainnet mint `Zhw9…` — a naive re-use of the
+mainnet mint fails the simulate with `IncorrectProgramId`; the correct devnet mint was cross-checked
+against the read-only `txline-explorer` reference before spending anything) and `serviceLevelId=1`
+(the free World Cup/Friendlies bundle — devnet's free tier id is **1**, not 12 as on mainnet).
+Result: subscribe tx confirmed, `apiToken` activated, cached at `apps/keeper/.cache/devnet-token.json`
+(gitignored). Real cost: devnet SOL tx fees only (`0 Units` — the subscription itself is free).
+
+**The demo semifinal fixture (`18241006`, England 1–2 Argentina) also exists on devnet with matching
+data.** `GET /api/fixtures/snapshot?startEpochDay=<~20 days ago>` lists it (`GameState=3`, finished);
+`GET /api/scores/snapshot/18241006` shows the same score progression as the mainnet recording (e.g.
+seq 875 mid-match: England 1–Argentina 2 already reached); `GET
+/api/scores/stat-validation?fixtureId=18241006&seq=960&statKey=1` returns `{key:1, value:1, period:5}`
+— **byte-identical predicate to the mainnet-recorded fixture** (`scores-proof-18241006-seq960-keys1-2.json`
+uses the same key/value/period). A real proof for this exact seq/key was pulled and saved at
+`onchain/fixtures/devnet/devnet-scores-proof-18241006-seq875-key1.json` (V1 shape: `ts`, `statToProve`,
+`eventStatRoot`, `summary`, `statProof`, `subTreeProof`, `mainTreeProof` — matches `ValidateStatArgs`
+exactly). **This means a genuinely live devnet `resolve_outcome` CPI against the real semifinal is
+possible** (fetch the proof from `txline-dev.txodds.com` at settle-time instead of loading a recorded
+fixture file), not just a recorded-fixture replay — see Phase 3 in `docs/BUILD-STATUS.md`.
+
+**Endpoint notes specific to the raw devnet surface** (differs from the local engine's `/v1/*`):
+- `GET /api/fixtures/snapshot?startEpochDay=N` — forward-30-day window FROM `startEpochDay`; pass an
+  epoch day ~20-30 days in the past to see already-finished fixtures, not just upcoming ones.
+- `GET /api/scores/snapshot/{fixtureId}` — full ordered update history for one fixture (not just the
+  latest); the last row is the most recent update.
+- `GET /api/scores/stat-validation?fixtureId=&seq=&statKey=&statKey2=` — the Merkle proof endpoint
+  (V1 shape only tested; V2/V3 multi-stat plural shape not yet confirmed live on devnet).
+- Devnet's free tier (`serviceLevelId=1`) covers Scores + StablePrice Odds for World Cup/Friendlies,
+  0-second delay — same breadth as the local engine gets from its mainnet subscription.

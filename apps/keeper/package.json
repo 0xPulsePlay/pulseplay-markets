@@ -7,18 +7,21 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "settle:demo": "tsx src/settleDemo.ts"
+    "settle:demo": "tsx src/settleDemo.ts",
+    "devnet:token": "tsx scripts/get-devnet-token.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
     "@noble/hashes": "^1.5.0",
     "@pulseplay/pricing": "workspace:*",
+    "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.4",
     "@txline/client-sdk": "file:../../vendor/txline-client-sdk-0.1.0.tgz",
     "@txline/verify": "file:../../vendor/txline-verify-0.1.0.tgz",
     "bn.js": "^5.2.1",
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

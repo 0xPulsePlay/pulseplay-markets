@@ -19,3 +19,4 @@ onchain/test-ledger/
 # keeper runtime state
 apps/keeper/.data/
 receipts/
+apps/keeper/.cache/
