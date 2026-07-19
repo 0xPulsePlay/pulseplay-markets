@@ -71,7 +71,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   health: () => get<Health>("/api/health"),
   fixtures: () => get<SegmentedFixtures>("/api/fixtures"),
-  catalog: () => get<Catalog>("/api/catalog"),
+  catalog: (fixtureId?: number) => get<Catalog>(fixtureId ? `/api/catalog?fixtureId=${fixtureId}` : "/api/catalog"),
   replay: (id: number) => get<ReplayData>(`/api/fixtures/${id}/replay`),
   parlay: (legs: { p: number; margin: number; label?: string }[], stake: number, pairwiseRho?: number[]) =>
     post<ParlayResult>("/api/parlay", { legs, stake, pairwiseRho }),

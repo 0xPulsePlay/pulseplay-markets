@@ -190,11 +190,31 @@ repo's real `main` is a one-command step from the parent checkout (`git merge
 worktree-agent-a7f8aedd349925f2f`) — not run from here to avoid touching a directory this session
 doesn't own._
 
-**Phase 2 — fixture picker / navigation**
-- [ ] P2.1 `GET /api/catalog` (+ replay) accepts `fixtureId` query param, defaults preserved
-- [ ] P2.2 fixtures list is genuinely clickable — picking a fixture scopes the storefront to it
-- [ ] P2.3 flag coverage noted (lower priority; extend only if time allows)
-- [ ] P2.4 copy/clarity pass on Storefront + MarketCard — plain-language one-liner per category
+**Phase 2 — fixture picker / navigation** — **DONE**
+- [x] P2.1 `GET /api/catalog?fixtureId=` — omitted defaults to the demo fixture exactly as before
+  (verified: default call and `?fixtureId=X` both return correct, distinct catalogs). `/api/catalog/:id`
+  (already fixture-scoped) kept as-is; `/api/fixtures/:id/replay` was already `:id`-scoped, no change
+  needed. `catalog.ts`'s `buildCatalog()` generalized to price ANY fixture with real de-margined odds
+  (TxLINE stat keys 1/2/5/7/8 are the universal soccer schema, not demo-specific) — but `settleable` is
+  only ever true for `CONFIG.demoFixtureId`, since the recorded Merkle proof fixtures only exist for
+  that one match. Never claims a "Settle" action it can't back with a real proof. **PASS**
+- [x] P2.2 fixtures list rows are real `<button>`s; clicking one calls `onSelectFixture`, which
+  re-fetches the catalog for that fixture and re-renders the hero/markets/ticket around it (ticket +
+  settlements cleared on switch — a stale settlement from fixture A must never show under fixture B).
+  Non-demo fixtures get an honest "priced only · pick the demo semifinal to settle" banner instead of
+  the Replay CTA. Verified in a real headless browser (Playwright): clicked "Jordan v Algeria", saw
+  real de-margined prices + the priced-only banner + a confirmation toast; clicked back to "England v
+  Argentina", the Replay CTA and settle flow returned. 0 console errors. Screenshots at
+  `/tmp/p2-02-after-click.png` (this session's scratch dir, not committed).  **PASS**
+- [~] P2.3 flag coverage: 10 of ~20 `TEAM_CODES` entries have real SVGs (`gb-eng, ar, fr, br, es, de,
+  pt, nl, hr, ma`); everything else (most of the ~110 finished fixtures — Jordan, Algeria, Austria,
+  Uruguay, New Zealand, India, …) falls back to a monogram, which reads fine but is lower-fidelity.
+  Left as-is per the brief's own priority call; a good fast-follow if time remains after Phase 5.  PENDING (deliberately deferred)
+- [x] P2.4 category tabs now show a genuine plain-language one-liner above the technical blurb (e.g.
+  Outcomes: "One question, one answer — e.g. 'will they score?'"; Combos: "Bundle a few outcomes from
+  the SAME match — all legs settle together, in one transaction."; Batch: "Bigger tickets, including
+  calculated markets like a corner-count difference."). MarketCard's existing "How it settles"
+  expandable plain-language note kept as-is (already good). **PASS**
 
 **Phase 3 — wallet connect + real ticket submission + visible settlement**
 - [ ] P3.1 Phantom wallet-connect (`window.phantom.solana`), `@solana/web3.js` + SPL token client deps added to web

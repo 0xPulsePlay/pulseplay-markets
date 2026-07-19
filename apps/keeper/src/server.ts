@@ -33,7 +33,12 @@ app.get("/api/fixtures", wrap(async (_req, res) => res.json(await segmentedFixtu
 app.get("/api/fixtures/:id", wrap(async (req, res) => res.json(await fixtureCard(Number(req.params.id)))));
 app.get("/api/fixtures/:id/replay", wrap(async (req, res) => res.json(await buildReplay(Number(req.params.id)))));
 
-app.get("/api/catalog", wrap(async (_req, res) => res.json(await catalogFor(CONFIG.demoFixtureId))));
+// ?fixtureId= scopes the catalog to any fixture (Phase 2: the fixtures list is now clickable); omitted
+// defaults to the demo fixture exactly as before. /api/catalog/:id kept for existing callers.
+app.get("/api/catalog", wrap(async (req, res) => {
+  const fixtureId = req.query.fixtureId ? Number(req.query.fixtureId) : CONFIG.demoFixtureId;
+  res.json(await catalogFor(fixtureId));
+}));
 app.get("/api/catalog/:id", wrap(async (req, res) => res.json(await catalogFor(Number(req.params.id)))));
 
 app.post("/api/parlay", wrap(async (req, res) => {

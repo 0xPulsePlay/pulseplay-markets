@@ -13,6 +13,8 @@ export function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [fixtures, setFixtures] = useState<SegmentedFixtures | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedFixtureId, setSelectedFixtureId] = useState<number | null>(null);
   const [view, setView] = useState<View>("store");
   const [ticket, setTicket] = useState<TicketLeg[]>([]);
   const [settlements, setSettlements] = useState<Record<string, Settled>>({});
@@ -22,10 +24,26 @@ export function App() {
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
     api.fixtures().then(setFixtures).catch(() => {});
-    api.catalog().then(setCatalog).catch(() => {});
   }, []);
 
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2600); }, []);
+
+  // Re-fetch the catalog whenever the selected fixture changes (Phase 2: the fixtures list is
+  // clickable). `undefined` fixtureId defers to the keeper's own demo-fixture default, so the very
+  // first load behaves exactly as before a fixture is ever picked.
+  useEffect(() => {
+    setCatalogLoading(true);
+    api.catalog(selectedFixtureId ?? undefined)
+      .then((c) => { setCatalog(c); setTicket([]); setSettlements({}); })
+      .catch(() => {})
+      .finally(() => setCatalogLoading(false));
+  }, [selectedFixtureId]);
+
+  const selectFixture = useCallback((fixtureId: number, label?: string) => {
+    setSelectedFixtureId(fixtureId);
+    setView("store");
+    flash(label ? `Now browsing ${label}` : "Fixture selected");
+  }, [flash]);
 
   const addLeg = useCallback((market: Market, side: boolean) => {
     setTicket((t) => {
@@ -60,7 +78,8 @@ export function App() {
       <main className="page">
         {view === "store" && (
           <Storefront
-            health={health} fixtures={fixtures} catalog={catalog}
+            health={health} fixtures={fixtures} catalog={catalog} catalogLoading={catalogLoading}
+            selectedFixtureId={selectedFixtureId} onSelectFixture={selectFixture}
             ticket={ticket} addLeg={addLeg} removeLeg={removeLeg}
             onOpenReplay={() => setView("replay")}
           />

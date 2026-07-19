@@ -196,6 +196,9 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 .spread { justify-content: space-between; }
 .pill { font-family: var(--pp-font-data); font-size: var(--pp-text-2xs); text-transform: uppercase; letter-spacing: var(--pp-tracking-data); color: var(--pp-color-text-faint); border: 1px solid var(--pp-color-border); border-radius: 6px; padding: 3px 7px; }
 .pill.demarg { color: var(--pp-color-verified); border-color: color-mix(in srgb, var(--pp-color-verified) 40%, var(--pp-color-border)); }
+.fixture-row { border-radius: var(--pp-radius-control); transition: background var(--pp-motion-feedback) var(--pp-motion-ease); }
+.fixture-row:hover { background: color-mix(in srgb, var(--pp-color-brand) 6%, transparent); }
+.fixture-row.selected { background: color-mix(in srgb, var(--pp-color-brand) 12%, transparent); }
 .cat-tabs { display: flex; gap: var(--pp-space-2); flex-wrap: wrap; margin-bottom: var(--pp-space-3); }
 .cat-tab { padding: 8px 14px; border-radius: var(--pp-radius-control); border: 1px solid var(--pp-color-border); font-weight: 600; font-size: var(--pp-text-sm); color: var(--pp-color-text-muted); }
 .cat-tab.active { border-color: var(--pp-color-brand); color: var(--pp-color-text); }
