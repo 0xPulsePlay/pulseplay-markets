@@ -50,6 +50,21 @@ sentinel** so occurrence markets settle both sides; the full tick corpus makes t
    reference program. Worth a line in the crate README.
 8. **`verify=1` calls mainnet RPC** and can be slow/rate-limited; we cache validation responses per stat
    for the receipt view.
+9. **`GET /v1/fixtures/{id}/state?ts=` can return a non-match-state administrative tick even mid-match,
+   not just at stream end.** The nearest-seq-to-ts lookup sometimes lands on a raw `"comment"` or
+   `"action_discarded"` event — `statusId: null` → `statusLabel: "?"`, and the `clock` field is
+   sometimes entirely absent even though the match clock is genuinely still running (confirmed live on
+   the demo fixture: seq 114/225/680, mid-H1 and mid-H2). A consumer that classifies phase/clock purely
+   off the single sample will render a fabricated glitch (we originally read the `"?"` as an unknown
+   phase and defaulted to "stoppage," and a missing clock field as `?? 0`, i.e. a false clock reset to
+   00:00). Fix: treat `statusLabel === "?"` as "no new information" and hold the last known
+   phase/clock/status text rather than trust the sample at face value — see `computeMatchPhase()`'s
+   `fallback` param and `assembleKeyframes()` in `apps/keeper/src/engine.ts`.
+10. **A fixture's very last `timeline.phases` entry's `wallEnd` can itself be a `"disconnected"` stream
+    marker, one ms after the real final match-state event**, not the real FINAL event. Querying
+    `state?ts=` at exactly that `wallEnd` returns the disconnect marker (`statusLabel: "?"`, no clock);
+    querying `wallEnd - 1` returns the real FINAL state cleanly. Worth flagging since `wallEnd` is
+    otherwise the natural "end of the fixture" anchor per the SDK's own docstring.
 
 ## Devnet (Night 2, 2026-07-19)
 

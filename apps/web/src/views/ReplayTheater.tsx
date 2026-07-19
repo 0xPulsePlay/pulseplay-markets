@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Catalog, type Health, type ReplayData, type ReplayKeyframe, type Market } from "../api";
+import { api, type Catalog, type Health, type ReplayData, type ReplayKeyframe, type ReplaySeriesDef, type PhaseBand, type MatchPhase, type Market } from "../api";
 import type { Settled } from "../App";
 import { Flag } from "../components/Flags";
 import { IconPlay, IconPause, IconReplay, IconBolt, IconShield, IconCheck, IconChevron } from "../components/icons";
@@ -7,10 +7,19 @@ import { IconPlay, IconPause, IconReplay, IconBolt, IconShield, IconCheck, IconC
 const SPEEDS = [1, 4, 12];
 const BASE_MS = 30000; // full match plays in 30s at 1× — cinematic, continuous, never compressed to mush
 
-interface Frame { clockSeconds: number; minuteLabel: string; score: { home: number; away: number }; winProb: { home: number; draw: number; away: number } | null; phase: string; half: number; }
+/** Plain-language label for the refined phase enum — display-only, mirrors engine.ts's PHASE_LABEL. */
+const MATCH_PHASE_LABEL: Record<MatchPhase, string> = {
+  "pre-match": "Pre-match", H1: "1st Half", HT: "Half-time", H2: "2nd Half",
+  ET1: "Extra Time 1", ET2: "Extra Time 2", stoppage: "Stoppage", "full-time": "Full Time",
+};
+
+interface Frame {
+  clockSeconds: number; minuteLabel: string; score: { home: number; away: number };
+  winProb: { home: number; draw: number; away: number } | null; phase: string; matchPhase: MatchPhase; half: number;
+}
 
 function interpolate(kfs: ReplayKeyframe[], p: number): Frame {
-  if (!kfs.length) return { clockSeconds: 0, minuteLabel: "00:00", score: { home: 0, away: 0 }, winProb: null, phase: "", half: 0 };
+  if (!kfs.length) return { clockSeconds: 0, minuteLabel: "00:00", score: { home: 0, away: 0 }, winProb: null, phase: "", matchPhase: "pre-match", half: 0 };
   const x = Math.max(0, Math.min(1, p));
   let i = 0;
   while (i < kfs.length - 1 && kfs[i + 1].t <= x) i++;
@@ -24,7 +33,10 @@ function interpolate(kfs: ReplayKeyframe[], p: number): Frame {
     draw: a.winProb.draw + (b.winProb.draw - a.winProb.draw) * f,
     away: a.winProb.away + (b.winProb.away - a.winProb.away) * f,
   } : a.winProb;
-  return { clockSeconds: cs, minuteLabel: /HT/.test(a.minuteLabel) ? "HT" : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`, score: a.score, winProb: wp, phase: a.phase, half: a.half };
+  return {
+    clockSeconds: cs, minuteLabel: /HT/.test(a.minuteLabel) ? "HT" : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`,
+    score: a.score, winProb: wp, phase: a.phase, matchPhase: a.matchPhase, half: a.half,
+  };
 }
 
 export function ReplayTheater({ catalog, health, settlements, recordSettlement, onOpenReceipt, flash }: {
@@ -91,7 +103,7 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
         </div>
         <div>
           <div className="sb-score">{frame.score.home}–{frame.score.away}</div>
-          <div className="sb-clock">{atFullTime ? "FULL TIME" : <><span style={{ marginRight: 6 }}>●</span>{frame.minuteLabel} {frame.phase && !/HT/.test(frame.minuteLabel) ? `· ${frame.phase}` : ""}</>}</div>
+          <div className="sb-clock">{atFullTime ? "FULL TIME" : <><span style={{ marginRight: 6 }}>●</span>{frame.minuteLabel} {frame.matchPhase && frame.matchPhase !== "HT" ? `· ${MATCH_PHASE_LABEL[frame.matchPhase]}` : ""}</>}</div>
         </div>
         <div className="sb-team away">
           <span className="name display" style={{ fontSize: "var(--pp-text-lg)" }}>{replay.away}</span>
@@ -113,7 +125,7 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
             {SPEEDS.map((s) => <button key={s} className={`speed ${speed === s ? "active" : ""}`} onClick={() => setSpeed(s)}>{s}×</button>)}
           </div>
         </div>
-        <WinProbChart kfs={replay.keyframes} progress={progress} home={replay.home} away={replay.away} />
+        <ReplayChart kfs={replay.keyframes} seriesDefs={replay.seriesDefs} phaseBands={replay.phaseBands} progress={progress} />
       </div>
 
       {/* market ticker */}
@@ -173,34 +185,91 @@ export function ReplayTheater({ catalog, health, settlements, recordSettlement, 
   );
 }
 
-function WinProbChart({ kfs, progress, home, away }: { kfs: ReplayKeyframe[]; progress: number; home: string; away: string }) {
+/** Background shade per phase-band kind — a stable, deliberate mapping onto the existing PulsePlay
+ * semantic palette (never decorative): live/orange = added time, verified/teal = settled full-time,
+ * warning/amber = the two breaks (HT + ET), a barely-there brand tint alternates 1st/2nd half so the
+ * halves read as distinct regions without competing with the series lines drawn on top. */
+const BAND_FILL: Record<MatchPhase, string> = {
+  "pre-match": "var(--pp-color-surface-raised-secondary)",
+  H1: "transparent",
+  HT: "color-mix(in srgb, var(--pp-color-warning) 14%, transparent)",
+  H2: "color-mix(in srgb, var(--pp-color-brand) 6%, transparent)",
+  ET1: "color-mix(in srgb, var(--pp-color-warning) 20%, transparent)",
+  ET2: "color-mix(in srgb, var(--pp-color-warning) 26%, transparent)",
+  stoppage: "color-mix(in srgb, var(--pp-color-live) 16%, transparent)",
+  "full-time": "color-mix(in srgb, var(--pp-color-verified) 14%, transparent)",
+};
+
+function ReplayChart({ kfs, seriesDefs, phaseBands, progress }: {
+  kfs: ReplayKeyframe[]; seriesDefs: ReplaySeriesDef[]; phaseBands: PhaseBand[]; progress: number;
+}) {
   const W = 760, H = 180, PADX = 8, PADY = 14;
-  const pts = kfs.filter((k) => k.winProb);
   const x = (t: number) => PADX + t * (W - 2 * PADX);
   const y = (pct: number) => PADY + (1 - pct / 100) * (H - 2 * PADY);
-  const line = (sel: (k: ReplayKeyframe) => number) => pts.filter((k) => k.t <= progress + 0.0001)
-    .map((k, i) => `${i === 0 ? "M" : "L"}${x(k.t).toFixed(1)},${y(sel(k)).toFixed(1)}`).join(" ");
-  const cur = pts.filter((k) => k.t <= progress + 0.0001).slice(-1)[0];
+
+  const visible = kfs.filter((k) => k.t <= progress + 0.0001);
+  const cur = visible[visible.length - 1];
+  // Pre-match is drawn as a dashed, muted lead-in (nearest-neighbor-extrapolated, not a live reading —
+  // "label reality everywhere": the flat/dashed look itself signals "not real match action yet").
+  const preMatchEndT = phaseBands.find((b) => b.kind === "pre-match")?.endT ?? 0;
+
+  // `visible` is ascending in t and preMatchEndT is a fixed cutoff, so "is this keyframe in the
+  // pre-match segment" is monotonic — a plain filter+map is exact and far simpler than a stateful scan.
+  const pathFor = (seriesId: string, wantPreMatch: boolean) => {
+    const segment = visible.filter((k) => (k.t <= preMatchEndT + 0.0001) === wantPreMatch && k.series[seriesId] != null);
+    return segment.map((k, i) => `${i === 0 ? "M" : "L"}${x(k.t).toFixed(1)},${y(k.series[seriesId]!).toFixed(1)}`).join(" ");
+  };
+  // Bridge point so the dashed pre-match lead-in visually joins the solid live line (no gap at kickoff).
+  const bridgeFor = (seriesId: string) => {
+    const preKfs = visible.filter((k) => k.t <= preMatchEndT + 0.0001 && k.series[seriesId] != null);
+    const postKf = visible.find((k) => k.t > preMatchEndT + 0.0001 && k.series[seriesId] != null);
+    if (!preKfs.length || !postKf) return "";
+    const last = preKfs[preKfs.length - 1];
+    return `M${x(last.t).toFixed(1)},${y(last.series[seriesId]!).toFixed(1)} L${x(postKf.t).toFixed(1)},${y(postKf.series[seriesId]!).toFixed(1)}`;
+  };
+
   const goalMarks = kfs.filter((k, i) => i > 0 && (k.score.home + k.score.away) > (kfs[i - 1].score.home + kfs[i - 1].score.away));
 
   return (
     <div className="chart-wrap">
       <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        {[25, 50, 75].map((g) => <line key={g} x1={PADX} x2={W - PADX} y1={y(g)} y2={y(g)} stroke="var(--pp-color-border)" strokeWidth="1" strokeDasharray="2 4" />)}
-        {goalMarks.map((k, i) => k.t <= progress + 0.0001 && (
-          <line key={i} x1={x(k.t)} x2={x(k.t)} y1={PADY} y2={H - PADY} stroke="var(--pp-color-live)" strokeWidth="1" opacity="0.5" />
+        {phaseBands.map((b) => (
+          <rect key={b.id} x={x(b.startT)} y={PADY} width={Math.max(0, x(b.endT) - x(b.startT))} height={H - 2 * PADY} fill={BAND_FILL[b.kind]} />
         ))}
-        <path d={line((k) => k.winProb!.home)} fill="none" stroke="var(--pp-graph-ultraviolet)" strokeWidth="2" />
-        <path d={line((k) => k.winProb!.away)} fill="none" stroke="var(--pp-graph-cyan)" strokeWidth="2" />
-        {cur && <>
-          <circle cx={x(cur.t)} cy={y(cur.winProb!.home)} r="3.5" fill="var(--pp-graph-ultraviolet)" />
-          <circle cx={x(cur.t)} cy={y(cur.winProb!.away)} r="3.5" fill="var(--pp-graph-cyan)" />
-        </>}
+        {[25, 50, 75].map((g) => <line key={g} x1={PADX} x2={W - PADX} y1={y(g)} y2={y(g)} stroke="var(--pp-color-border)" strokeWidth="1" strokeDasharray="2 4" />)}
+        {phaseBands.slice(1).map((b) => (
+          <line key={`sep-${b.id}`} x1={x(b.startT)} x2={x(b.startT)} y1={PADY} y2={H - PADY} stroke="var(--pp-color-border-strong)" strokeWidth="1" opacity="0.5" />
+        ))}
+        {goalMarks.map((k, i) => k.t <= progress + 0.0001 && (
+          <line key={i} x1={x(k.t)} x2={x(k.t)} y1={PADY} y2={H - PADY} stroke="var(--pp-color-live)" strokeWidth="1.5" opacity="0.7" />
+        ))}
+        {seriesDefs.map((def) => (
+          <g key={def.id}>
+            <path d={bridgeFor(def.id)} fill="none" stroke={`var(${def.colorVar})`} strokeWidth="1.5" strokeDasharray="1 3" opacity="0.55" />
+            <path d={pathFor(def.id, true)} fill="none" stroke={`var(${def.colorVar})`} strokeWidth="1.5" strokeDasharray="1 3" opacity="0.55" />
+            <path d={pathFor(def.id, false)} fill="none" stroke={`var(${def.colorVar})`} strokeWidth="2" />
+          </g>
+        ))}
+        {cur && seriesDefs.map((def) => {
+          const v = cur.series[def.id];
+          if (v == null) return null;
+          return <circle key={def.id} cx={x(cur.t)} cy={y(v)} r="3.5" fill={`var(${def.colorVar})`} />;
+        })}
+        {phaseBands.filter((b) => x(b.endT) - x(b.startT) > 34).map((b) => (
+          <text key={`lbl-${b.id}`} x={(x(b.startT) + x(b.endT)) / 2} y={PADY + 11} textAnchor="middle"
+            className="chart-band-label" fill="var(--pp-color-text-faint)">
+            {b.kind === "stoppage" ? "+" : b.label.toUpperCase()}
+          </text>
+        ))}
       </svg>
       <div className="legend">
-        <span><span className="sw" style={{ background: "var(--pp-graph-ultraviolet)" }} />{home} win {cur?.winProb ? `${cur.winProb.home.toFixed(0)}%` : ""}</span>
-        <span><span className="sw" style={{ background: "var(--pp-graph-cyan)" }} />{away} win {cur?.winProb ? `${cur.winProb.away.toFixed(0)}%` : ""}</span>
-        <span className="faint">de-margined 1X2 · goals marked</span>
+        {seriesDefs.map((def) => (
+          <span key={def.id}>
+            <span className="sw" style={{ background: `var(${def.colorVar})` }} />
+            {def.label} {cur?.series[def.id] != null ? `${cur.series[def.id]!.toFixed(0)}%` : ""}
+          </span>
+        ))}
+        <span className="faint">de-margined · goals marked · shaded = HT / 2nd half / stoppage / full time</span>
       </div>
     </div>
   );

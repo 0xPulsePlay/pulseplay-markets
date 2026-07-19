@@ -255,11 +255,55 @@ seeded by `authority`, and the demo-settle flow deliberately uses a fresh throwa
 so repeated demo settles never collide. P3.4 will extend the settle path to ALSO resolve/claim a
 connected wallet's own market, closing the loop end-to-end._
 
-**Phase 4 — replay chart overhaul**
-- [ ] P4.1 `buildReplay()` pulls odds ticks for markets actually relevant to the catalog, not just 1X2
-- [ ] P4.2 each market its own labeled line/series with a legend
-- [ ] P4.3 visual HT/2H/ET/stoppage bands + separated pre-match segment
-- [ ] P4.4 no regression on cinematic continuous rendering at fast-forward (explicitly tested)
+**Phase 4 — replay chart overhaul** — **DONE, all green** (built on a concurrent sub-agent worktree,
+merged in and independently re-verified: tests + typecheck re-run clean post-merge)
+- [x] P4.1 `buildReplay()` pulls odds ticks for markets actually relevant to the catalog, not just 1X2  **PASS**
+- [x] P4.2 each market its own labeled line/series with a legend  **PASS**
+- [x] P4.3 visual HT/2H/ET/stoppage bands + separated pre-match segment  **PASS**
+- [x] P4.4 no regression on cinematic continuous rendering at fast-forward (explicitly tested)  **PASS**
+
+_Evidence (apps/keeper/src/engine.ts, apps/keeper/test/engine.test.ts, apps/web/src/views/ReplayTheater.tsx):_
+- _P4.1: `buildReplay()` now pulls `1X2_PARTICIPANT_RESULT` (win-prob) + `OVERUNDER_PARTICIPANT_GOALS`
+  over/line=0.5 (the exact line `catalog.ts`'s "England to score" reuses). Verified via
+  `GET /v1/fixtures/18241006/markets` that these are the ONLY two markets with real ticks the catalog
+  actually prices off for this fixture (BOTH_TEAMS_TO_SCORE / DOUBLE_CHANCE / HANDICAP_RESULT /
+  CORRECT_SCORE / OVERUNDER_PARTICIPANT_CORNERS / ASIAN_HANDICAP all returned 0 series rows) — nothing
+  fabricated for markets with zero ticks; `eng-exact-1`/`red-card` stay deliberately unplotted (they're
+  "modeled" pricing, not live series, in the catalog itself)._
+- _P4.2: `ReplayData.seriesDefs` (4 entries: England win / Draw / Argentina win / Over 0.5 match goals)
+  each render as their own labeled `<path>` + legend chip with a live % readout, using the existing
+  PulsePlay graph palette (`--pp-graph-*` tokens). Verified live via `/api/fixtures/18241006/replay` and
+  Playwright screenshot (legend text: "ENGLAND WIN 0% · DRAW 3% · ARGENTINA WIN 96% · OVER 0.5 MATCH
+  GOALS 52%" at full time)._
+- _P4.3: `buildPhaseBands()` derives Pre-match/1st Half/Half-time/2nd Half/Stoppage/Full-Time bands
+  straight from the fixture's real `timeline.phases` wall-clock boundaries (not from keyframe survival,
+  which stays robust under dedup). Live-verified bands for fixture 18241006: pre-match 0→5%, H1 5→35%,
+  stoppage 35→37%, HT 37→47%, H2 47→77%, stoppage 77→87%, full-time 87→100% — H1 stoppage (~2:53) and H2
+  stoppage (~11:11, since this match ran deep into added time) render as distinctly different widths, as
+  they should. Pre-match renders as a dashed, muted lead-in (bridged into the solid live line at
+  kickoff) — "label reality everywhere": it visually reads as "not live yet," not fabricated data._
+- _P4.4: Playwright-verified at 12× — screenshots at ~21/43/65/86/100% progress during a live 12× run
+  all show crisp, fully-legible 4-series lines with no compression/mush; progress advances linearly
+  (~500ms per ~21% step, matching BASE_MS=30000/12=2500ms total), confirming the RAF/interpolate() path
+  is unchanged and the match-clock display stays honest through stoppage ("100:25 · Stoppage" shown
+  mid-run). 0 console/page errors across the full journey (load → scrub 0/50/100% → 12× playback →
+  full-time). Also verified no mobile horizontal overflow at 390px with the new 4-item legend
+  (scrollWidth === clientWidth === 390)._
+- _Unit tests: 37/37 green (`pnpm --filter @pulseplay/keeper test`) — `computeMatchPhase`,
+  `buildPhaseBands`, `makeTMap`, `build1x2Series`, `buildLineSeries`, `nearestValue`, and
+  `assembleKeyframes` (the network-free multi-series + phase composition seam), all driven by
+  fixture-18241006-shaped recorded data (real timeline.phases + real clock/statusLabel readings pulled
+  live during development). Two real live-data bugs were found and fixed while runtime-verifying against
+  the actual engine (not caught by the hand-authored hermetic fixtures, since those fixtures were
+  necessarily "idealized"): (1) the engine's nearest-seq-to-ts state lookup sometimes lands on a
+  non-match-state administrative tick (statusLabel `"?"`, clock sometimes entirely absent) even
+  mid-match — was rendering as a fabricated "stoppage" blip and a momentary 00:00 clock reset;
+  `computeMatchPhase()` now takes a `fallback` param and `assembleKeyframes()` carries forward the last
+  known phase/clock instead. (2) the very last sample, queried exactly at the FINAL phase's `wallEnd`,
+  lands on a bare stream "disconnected" marker one ms after the real FINAL state — fixed by querying
+  `endTs - 1` for that one sample while still recording it at the true `endTs` so `t` stays exactly 1.
+  Both are logged with root cause + fix in `docs/TXLINE-INTEGRATION.md`'s API-feedback list._
+
 
 **Phase 5 — demo script + docs**
 - [ ] P5.1 `docs/DEMO-PLAN.md` — beat-by-beat ≤5min walkthrough with a fallback per beat
@@ -267,4 +311,4 @@ connected wallet's own market, closing the loop end-to-end._
 - [ ] P5.3 final `BLOCKED.md` pass, honest and matching existing rigor
 
 ## PASS/PENDING table (Night 2)
-_Updated as phases land — see entries above; table intentionally starts all-PENDING._
+_Phase 0, 1, 2 done (see evidence above). Phase 3: P3.1-P3.3 done; P3.4 deliberately deferred until after the Phase 4 merge (both touch `ReplayTheater.tsx`'s settlement panel) — now merged, P3.4 continues next. Phase 4 done (see evidence above, merged from a concurrent sub-agent's worktree and independently re-verified — tests + typecheck re-run clean post-merge). Phase 5 not yet started._

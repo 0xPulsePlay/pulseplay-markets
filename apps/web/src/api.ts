@@ -24,13 +24,23 @@ export interface Market {
 }
 export interface Catalog { fixtureId: number; categories: { outcomes: Market[]; combos: Market[]; batch: Market[] }; }
 
+/** Refined phase-band enum (Night 2 Phase 4 replay overhaul) — mirrors apps/keeper/src/engine.ts. */
+export type MatchPhase = "pre-match" | "H1" | "HT" | "H2" | "ET1" | "ET2" | "stoppage" | "full-time";
+
+export interface ReplaySeriesDef { id: string; label: string; market: string; colorVar: string; }
+export interface PhaseBand { id: string; kind: MatchPhase; label: string; startT: number; endT: number; }
+
 export interface ReplayKeyframe {
   t: number; seq: number; ts: number; clockSeconds: number; minuteLabel: string; phase: string;
-  half: 0 | 1 | 2; score: { home: number; away: number }; winProb: { home: number; draw: number; away: number } | null;
+  matchPhase: MatchPhase; half: 0 | 1 | 2; score: { home: number; away: number };
+  winProb: { home: number; draw: number; away: number } | null;
+  /** Every ReplayData.seriesDefs entry, nearest-sampled at this keyframe's ts. */
+  series: Record<string, number | null>;
 }
 export interface ReplayData {
   fixtureId: number; home: string; away: string; homeCode: string; awayCode: string;
-  finalScore: { home: number; away: number } | null; keyframes: ReplayKeyframe[];
+  finalScore: { home: number; away: number } | null; kickoffTs: number;
+  seriesDefs: ReplaySeriesDef[]; phaseBands: PhaseBand[]; keyframes: ReplayKeyframe[];
 }
 
 export interface ParlayResult {
