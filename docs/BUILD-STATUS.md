@@ -112,11 +112,32 @@ Acceptance criteria authored up front (2026-07-19 08:5x UTC) — PASS/PENDING ta
 
 ## Acceptance criteria
 
-**Phase 0 — devnet baseline (timeboxed ~45-60min)**
-- [ ] P0.1 `onchain/scripts/get-devnet-token.mjs` dry-runs the subscribe→activate flow against devnet; real run only if dry-run is clean
-- [ ] P0.2 Outcome (success or logged BLOCKED) recorded either way, doesn't stall later phases
-- [ ] P0.3 `anchor build -- --features devnet` + deploy to devnet with the funded deploy-authority wallet; `[programs.devnet]` in Anchor.toml
-- [ ] P0.4 keeper cluster/RPC/programId/oracleProgram/dailyScoresRootsPda/wallet-path all env-driven; localnet default behavior unchanged; `CLUSTER=devnet` boots + `/api/health` chain:true against devnet
+**Phase 0 — devnet baseline (timeboxed ~45-60min)** — **DONE in ~22min, all green, plus a bonus find**
+- [x] P0.1 `apps/keeper/scripts/get-devnet-token.mjs` (moved from the brief's example `onchain/scripts/`
+  path — bare ESM imports need to resolve against a workspace member's node_modules; documented in the
+  file header) dry-runs the subscribe→activate flow against devnet; real run only after a clean dry-run  **PASS**
+- [x] P0.2 Outcome: **SUCCEEDED** — devnet apiToken obtained (`apps/keeper/.cache/devnet-token.json`,
+  gitignored), subscribe tx confirmed on-chain, 0-cost free tier. **Bonus:** fixture 18241006 (the demo
+  semifinal) is live on devnet with matching data — pulled a real V1 proof, saved at
+  `onchain/fixtures/devnet/devnet-scores-proof-18241006-seq875-key1.json`. Full writeup in
+  `docs/TXLINE-INTEGRATION.md` → "Devnet" section.  **PASS**
+- [x] P0.3 `anchor build -- --features devnet` succeeded; deployed to devnet at the STABLE program id
+  `2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin` (authority = deploy wallet
+  `5nBA87pXc63mM2i2uFfyMKa3uwRagg499xecGhpKjCyJ`) — note: `anchor build` auto-generates a FRESH
+  `target/deploy/*-keypair.json` when `target/` doesn't exist yet (gitignored), so the first deploy
+  attempt landed on the wrong ephemeral id (`7HdX8Xb…`); caught it, copied the canonical checked-in
+  keypair (`programs/pulseplay-escrow/pulseplay_escrow-keypair.json`) into `target/deploy/` and
+  redeployed correctly, then closed the stray program to reclaim rent. `[programs.devnet]` added to
+  `onchain/Anchor.toml`.  **PASS**
+- [x] P0.4 `apps/keeper/src/config.ts` rewritten: cluster/rpcUrl/programId/oracleProgram/
+  dailyScoresRootsPda/walletKeypairPath all env-driven via a `CLUSTER_PRESETS` table (localnet preset
+  values byte-identical to the old hardcoded defaults — verified no regression); `chain.ts` reads
+  `CONFIG.walletKeypairPath` instead of a hardcoded `~/.config/solana/id.json`, and the
+  `daily_scores_roots` PDA lookup is now a lazy function (was a module-level `new PublicKey("")` that
+  would have crashed boot under the devnet preset, which has no single fixed PDA — devnet's PDA is
+  per-epoch-day, computed at proof time, not fixed). Verified: `CLUSTER=devnet
+  SOLANA_RPC_URL=https://api.devnet.solana.com` boots and `/api/health` → `chain:true, cluster:devnet,
+  oracleProgram:6pW64gN1…`; localnet default re-verified unchanged (`chain:true, cluster:localnet`).  **PASS**
 
 **Phase 1 — USDC devnet wagering token (branch `nightshift/usdc-escrow`, prove on localnet first)**
 - [ ] P1.1 devnet SPL token minted (classic Token program, 6 decimals, symbol USDC, name labeled "(Devnet Test)")

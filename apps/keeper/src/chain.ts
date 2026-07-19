@@ -9,7 +9,6 @@ import BN from "bn.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import { statLeaf, describeStatKey } from "@txline/verify";
 import { CONFIG } from "./config.js";
 import type { Market } from "./catalog.js";
@@ -22,8 +21,19 @@ const REPO = join(HERE, "..", "..", "..");
 const FIXDIR = join(REPO, "onchain", "fixtures");
 const IDL_PATH = join(REPO, "onchain", "target", "idl", "pulseplay_escrow.json");
 const ORACLE = new PublicKey(CONFIG.oracleProgram);
-const DAILY = new PublicKey(CONFIG.dailyScoresRootsPda);
 const DEMO_SEQ = 960;
+
+// Lazy (not module-level): on devnet there is no single fixed daily_scores_roots PDA (it's
+// per-epoch-day), so CONFIG.dailyScoresRootsPda is "" there by default. Constructing a PublicKey("")
+// at import time would crash the whole server at boot before /api/health even has a chance to report
+// `chain: false` cleanly — only throw when a caller actually needs the (localnet-only, for now) fixed
+// PDA. Devnet settlement computes its PDA per-proof instead (see docs/TXLINE-INTEGRATION.md).
+function dailyScoresRootsPda(): anchor.web3.PublicKey {
+  if (!CONFIG.dailyScoresRootsPda) {
+    throw new Error(`no fixed daily_scores_roots PDA configured for cluster "${CONFIG.cluster}" — set DAILY_SCORES_ROOTS_PDA or use a per-proof PDA`);
+  }
+  return new PublicKey(CONFIG.dailyScoresRootsPda);
+}
 
 const loadJson = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 const node = (n: any) => ({ hash: n.hash, isRightSibling: n.isRightSibling });
@@ -35,7 +45,7 @@ function program() {
   if (_program) return _program;
   const idl = loadJson(IDL_PATH);
   _conn = new Connection(CONFIG.rpcUrl, "confirmed");
-  const payer = Keypair.fromSecretKey(Uint8Array.from(loadJson(join(os.homedir(), ".config", "solana", "id.json"))));
+  const payer = Keypair.fromSecretKey(Uint8Array.from(loadJson(CONFIG.walletKeypairPath)));
   const provider = new anchor.AnchorProvider(_conn, new anchor.Wallet(payer), { commitment: "confirmed" });
   _program = new anchor.Program(idl, provider);
   return _program;
@@ -150,13 +160,13 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
   let resolve: string;
   if (m.generation === "V1") {
     resolve = await prog.methods.resolveOutcome(outcomeArgs(proof, m.statKey, m.period))
-      .accounts({ market, dailyScoresRoots: DAILY, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else if (m.generation === "V2") {
     resolve = await prog.methods.resolveCombo(comboArgs(proof))
-      .accounts({ market, dailyScoresRoots: DAILY, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   } else {
     resolve = await prog.methods.resolveTicket(ticketArgs(proof))
-      .accounts({ market, dailyScoresRoots: DAILY, txoracleProgram: ORACLE }).preInstructions(cu).rpc();
+      .accounts({ market, dailyScoresRoots: dailyScoresRootsPda(), txoracleProgram: ORACLE }).preInstructions(cu).rpc();
   }
   const account = await prog.account.market.fetch(market);
   const outcome: boolean = account.outcome;

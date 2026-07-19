@@ -7,6 +7,9 @@ skip-lint = false
 [programs.localnet]
 pulseplay_escrow = "2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin"
 
+[programs.devnet]
+pulseplay_escrow = "2YbfXEyo18qDvSFhB67fxzPm73q3PxV4rRCeD29jvGin"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
