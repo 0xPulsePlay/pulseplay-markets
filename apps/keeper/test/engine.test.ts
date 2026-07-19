@@ -257,3 +257,37 @@ describe("assembleKeyframes — multi-series + phase composition, no network", (
     expect(final.score).toEqual({ home: 1, away: 2 });
   });
 });
+
+describe("assembleKeyframes — engine '?' administrative-event samples never fabricate a phase/clock glitch", () => {
+  // Recorded live from GET /v1/fixtures/18241006/state?ts=… during development: the nearest-seq-to-ts
+  // lookup sometimes lands on a non-match-state event (statusId null → statusLabel "?"), even mid-match:
+  //   seq=114 ts=1784142751448 action="action_discarded" clock={running:true,seconds:662}  (mid-H1)
+  //   seq=225 ts=1784143483642 action="comment"           clock ABSENT entirely            (mid-H1)
+  // Before the fix, both rendered as a fabricated "stoppage" blip (and the second as a clock reset to
+  // 00:00) sandwiched between ordinary H1 frames — this suite pins the fix: hold the last known reading.
+  const kickoffTs = 1784142020222;
+  const tMap = (ts: number) => (ts - kickoffTs) / 10_000_000; // simple linear map, plenty of range for this window
+  const samples: StateSample[] = [
+    { ts: kickoffTs + 619_000, seq: 104, statusLabel: "H1", clockSeconds: 619, score: { home: 0, away: 0 } },
+    { ts: 1784142751448, seq: 114, statusLabel: "?", clockSeconds: 662, score: { home: 0, away: 0 } }, // action_discarded, real clock
+    { ts: kickoffTs + 835_000, seq: 127, statusLabel: "H1", clockSeconds: 835, score: { home: 0, away: 0 } },
+    { ts: 1784143483642, seq: 225, statusLabel: "?", clockSeconds: null, score: { home: 0, away: 0 } }, // comment, no clock field
+    { ts: kickoffTs + 1_662_000, seq: 233, statusLabel: "H1", clockSeconds: 1662, score: { home: 0, away: 0 } },
+  ];
+  const kfs = assembleKeyframes(samples, kickoffTs, tMap, [], {});
+
+  it("a '?' sample with a real clock reading holds the last known matchPhase (not a fabricated stoppage)", () => {
+    const kf = kfs.find((k) => k.seq === 114)!;
+    expect(kf.matchPhase).toBe("H1");
+    expect(kf.clockSeconds).toBe(662); // the real clock reading on that sample is still used
+  });
+  it("a '?' sample with no clock field at all resolves identically to the prior frame (no 00:00 flicker) — collapses via the normal exact-duplicate dedup rather than surviving as a fabricated glitch frame", () => {
+    expect(kfs.find((k) => k.seq === 225)).toBeUndefined(); // deduped: it now reads exactly like seq=127
+    // No surviving keyframe anywhere in this run ever shows the clock resetting to 00:00 mid-match.
+    const midMatch = kfs.filter((k) => k.seq !== 3 /* n/a here, no pre-match sample in this fixture */);
+    expect(midMatch.every((k) => k.minuteLabel !== "00:00")).toBe(true);
+  });
+  it("carries the held statusLabel into `phase` too, so nothing ever displays the raw \"?\" sentinel", () => {
+    expect(kfs.some((k) => k.phase === "?")).toBe(false);
+  });
+});

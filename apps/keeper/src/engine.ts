@@ -84,10 +84,13 @@ const PERIOD_END_SECONDS: Record<string, number> = { H1: 45 * 60, H2: 90 * 60, E
 /**
  * Pure: classify a single (statusLabel, clock.seconds) reading into the refined phase enum.
  * `kickedOff` lets the caller mark the pre-match tracked window (status "NS") distinctly even before
- * any real clock/score data exists for it. No network, no fixture-specific assumptions — safe to
- * unit-test with recorded/synthetic samples.
+ * any real clock/score data exists for it. `fallback` is returned for any code this function doesn't
+ * recognize (PEN/WPE/FPE, or the engine's own "?" sentinel for a statusId-less administrative event —
+ * see assembleKeyframes) — the caller decides what "no new information" should mean; defaults to
+ * "stoppage" for a context-free call. No network, no fixture-specific assumptions — safe to unit-test
+ * with recorded/synthetic samples.
  */
-export function computeMatchPhase(code: string, clockSeconds: number, kickedOff: boolean): MatchPhase {
+export function computeMatchPhase(code: string, clockSeconds: number, kickedOff: boolean, fallback: MatchPhase = "stoppage"): MatchPhase {
   if (!kickedOff) return "pre-match";
   const upper = (code || "").toUpperCase();
   if (upper === "HT" || upper === "HTET") return "HT";
@@ -95,7 +98,7 @@ export function computeMatchPhase(code: string, clockSeconds: number, kickedOff:
   const periodEnd = PERIOD_END_SECONDS[upper];
   if (periodEnd != null) return clockSeconds > periodEnd ? "stoppage" : (upper as MatchPhase);
   if (upper === "NS") return "pre-match";
-  return "stoppage"; // PEN/WPE/FPE/unrecognized in-play labels — defensive fallback, not exercised by the demo fixture
+  return fallback;
 }
 
 const PHASE_LABEL: Record<MatchPhase, string> = {
@@ -260,8 +263,11 @@ function minuteLabel(clockSeconds: number, statusLabel: string): string {
 export interface StateSample {
   ts: number;
   seq: number;
+  /** The engine's own "?" sentinel for a statusId-less administrative event (a raw "comment" /
+   * "action_discarded" / "disconnected" tick) — real even mid-match, not just at stream end. */
   statusLabel: string;
-  clockSeconds: number;
+  /** null when the raw sample had no `clock` field at all (distinct from a genuine 0, e.g. at kickoff). */
+  clockSeconds: number | null;
   score: { home: number; away: number } | null;
 }
 
@@ -282,7 +288,14 @@ export function assembleKeyframes(
   const sorted = [...samples].sort((a, b) => a.ts - b.ts);
   sorted.forEach((s, i) => {
     const kickedOff = s.ts >= kickoffTs;
-    const matchPhase = computeMatchPhase(s.statusLabel, s.clockSeconds, kickedOff);
+    // The engine's nearest-seq-to-ts lookup can land on a non-match-state administrative event —
+    // statusLabel "?" and/or no clock at all — even mid-match (confirmed live: seq 114/225/680 on the
+    // demo fixture, mid-H1/mid-H2). Treat that as "no new information": hold the last known status
+    // text + clock reading rather than let a metadata tick render as a fabricated phase/clock glitch.
+    const noSignal = s.statusLabel === "?" || s.statusLabel === "";
+    const statusLabel = noSignal && last ? last.phase : s.statusLabel;
+    const clockSeconds = s.clockSeconds ?? last?.clockSeconds ?? 0;
+    const matchPhase = computeMatchPhase(statusLabel, clockSeconds, kickedOff, last?.matchPhase ?? "H1");
     const half: 1 | 2 | 0 =
       matchPhase === "H2" || matchPhase === "ET2" ? 2 :
       matchPhase === "H1" || matchPhase === "ET1" || matchPhase === "stoppage" ? 1 :
@@ -293,8 +306,8 @@ export function assembleKeyframes(
       ? { home: series["1x2-home"] as number, draw: series["1x2-draw"] ?? 0, away: series["1x2-away"] as number }
       : null;
     const kf: ReplayKeyframe = {
-      t: tMap(s.ts), seq: s.seq, ts: s.ts, clockSeconds: s.clockSeconds,
-      minuteLabel: minuteLabel(s.clockSeconds, s.statusLabel), phase: s.statusLabel, matchPhase, half,
+      t: tMap(s.ts), seq: s.seq, ts: s.ts, clockSeconds,
+      minuteLabel: minuteLabel(clockSeconds, statusLabel), phase: statusLabel, matchPhase, half,
       score: s.score ?? { home: 0, away: 0 }, winProb, series,
     };
     const isLast = i === sorted.length - 1;
@@ -355,7 +368,13 @@ export async function buildReplay(fixtureId: number, samples = 90): Promise<Repl
   for (let i = 0; i < preMatchSamples; i++) tsList.push(Math.round(preMatchStartTs + ((kickoffTs - preMatchStartTs) * i) / preMatchSamples));
   for (let i = 0; i < matchSamples; i++) tsList.push(Math.round(kickoffTs + ((endTs - kickoffTs) * i) / (matchSamples - 1)));
 
-  const states = await Promise.all(tsList.map((ts) => client.state(fixtureId, { ts }).catch(() => null)));
+  // The engine's very last feed event at a fixture's true last-update ts is sometimes a bare stream
+  // "disconnected" marker (statusLabel "?", no clock) rather than the real FINAL state — confirmed live
+  // for 18241006 (ts=phases.at(-1).wallEnd lands on it; ts-1 lands cleanly on the real FINAL/seq=962
+  // event). Query 1ms earlier for that one sample only; still RECORD it at the true endTs so `t` stays
+  // exactly 1 for the last keyframe (a ~1ms shift is ~1e-7 in t-space over an ~hour-plus match window).
+  const queryTsList = tsList.map((ts, i) => (i === tsList.length - 1 ? ts - 1 : ts));
+  const states = await Promise.all(queryTsList.map((ts) => client.state(fixtureId, { ts }).catch(() => null)));
   const stateSamples: StateSample[] = [];
   states.forEach((st: any, i) => {
     if (!st) return;
@@ -363,7 +382,7 @@ export async function buildReplay(fixtureId: number, samples = 90): Promise<Repl
       ts: tsList[i],
       seq: st.seq ?? 0,
       statusLabel: st.statusLabel ?? "",
-      clockSeconds: st.clock?.seconds ?? 0,
+      clockSeconds: st.clock ? (st.clock.seconds ?? 0) : null, // null = field absent (metadata tick), not a real 0
       score: st.score ? { home: st.score.participant1 ?? 0, away: st.score.participant2 ?? 0 } : null,
     });
   });
