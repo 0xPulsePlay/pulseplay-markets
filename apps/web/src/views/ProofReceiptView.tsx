@@ -23,7 +23,7 @@ export function ProofReceiptView({ catalog, settlements, activeReceipt, setActiv
       <div className="empty-state">
         <IconShield size={28} />
         <p style={{ marginTop: 12 }}>No settled market selected. Play the replay to full time and settle a market to see its proof receipt.</p>
-        <button className="btn" style={{ marginTop: 16 }} onClick={onBack}>Go to replay</button>
+        <button className="btn" style={{ marginTop: 16 }} onClick={onBack}>Go to markets</button>
       </div>
     );
   }
@@ -122,14 +122,11 @@ export function ProofReceiptView({ catalog, settlements, activeReceipt, setActiv
           {settle && <>
             <div className="stat-row"><span className="k">Settle tx</span></div>
             <div className="txlink" style={{ marginBottom: 8 }}>{settle.txids.resolve}</div>
-            <div className="stat-row"><span className="k">Winner claimed</span><span className="v yes">{(Number(settle.potBaseUnits) / 10 ** settle.mintDecimals).toFixed(2)} {settle.mintLabel}</span></div>
+            <div className="stat-row"><span className="k">Winner claimed</span><span className="v yes">{(Number(settle.potBaseUnits) / 10 ** settle.mintDecimals).toFixed(2)} {settle.mintLabel.split(" · ")[0]}</span></div>
           </>}
-          <div className="row" style={{ gap: 6, marginTop: 10 }}>
-            <span className="badge net">localnet</span><span className="badge sim">simulated money</span>
-          </div>
         </div>
 
-        <button className="btn block" onClick={onBack}>Back to replay</button>
+        <button className="btn block" onClick={onBack}>Back to markets</button>
       </aside>
     </div>
   );

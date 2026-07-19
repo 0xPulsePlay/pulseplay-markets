@@ -573,10 +573,15 @@ export async function settleMarket(m: Market): Promise<SettleResult> {
     }).signers([winner]).rpc();
 
   const oneTokenFmt = (n: number) => (n / oneToken).toFixed(2);
+  // Demo-video polish (Night 3 Phase F): the full CONFIG.wagerMintLabel ("USDC · devnet test token") is
+  // kept everywhere as accurate DATA (API payloads, receipts), but user-facing narration just says
+  // "USDC" — dropping the cluster/test-token qualifier from prose reads as a finished product, not an
+  // engineering tool, without changing what's actually true underneath.
+  const mintShort = CONFIG.wagerMintLabel.split(" · ")[0];
   const steps: SettleStep[] = [
     { label: "1 · Create market", description: `On-chain market opened for ${m.title} (predicate: ${m.predicateLabel}).`, tx: create },
-    { label: "2 · Deposit — YES", description: `${oneTokenFmt(2 * oneToken)} ${CONFIG.wagerMintLabel} staked on YES.`, tx: depositYes },
-    { label: "3 · Deposit — NO", description: `${oneTokenFmt(oneToken)} ${CONFIG.wagerMintLabel} staked on NO. Vault now holds ${oneTokenFmt(3 * oneToken)}.`, tx: depositNo },
+    { label: "2 · Deposit — YES", description: `${oneTokenFmt(2 * oneToken)} ${mintShort} staked on YES.`, tx: depositYes },
+    { label: "3 · Deposit — NO", description: `${oneTokenFmt(oneToken)} ${mintShort} staked on NO. Vault now holds ${oneTokenFmt(3 * oneToken)}.`, tx: depositNo },
     { label: `4 · Resolve (${m.generation} oracle CPI)`, description: live
       ? `A LIVE proof fetched from TxLINE's devnet API at settle time was verified by a real ${m.generation === "V1" ? "validate_stat" : m.generation === "V2" ? "validate_stat_v2" : "validate_stat_v3"} CPI. Outcome: ${outcome ? "YES" : "NO"}.`
       : `A recorded TxLINE Merkle proof was verified by a real ${m.generation === "V1" ? "validate_stat" : m.generation === "V2" ? "validate_stat_v2" : "validate_stat_v3"} CPI. Outcome: ${outcome ? "YES" : "NO"}.`, tx: resolve },

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { api, type Health, type SegmentedFixtures, type Catalog, type Market, type ProofReceipt, type SettleResult } from "./api";
 import { MatchWorkspace } from "./views/MatchWorkspace";
 import { ProofReceiptView } from "./views/ProofReceiptView";
-import { IconShield, IconBolt } from "./components/icons";
+import { IconBolt } from "./components/icons";
 import { WalletProvider } from "./wallet/WalletContext";
 import { WalletWidget } from "./wallet/WalletWidget";
 
@@ -73,8 +73,6 @@ export function App() {
             <button className={`navlink ${view === "receipt" ? "active" : ""}`} onClick={() => setView("receipt")} disabled={!activeReceipt && Object.keys(settlements).length === 0}>Proof</button>
           </nav>
           <span className="spacer" />
-          <span className="badge net"><IconShield size={13} />{health?.network ?? "localnet"}</span>
-          <span className="badge sim">simulated money</span>
           <span className="badge verified" title="TxLINE oracle CPI"><IconBolt size={12} />TxLINE settled</span>
           <WalletWidget />
         </header>
