@@ -1,6 +1,7 @@
-<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="300" viewBox="0 0 1280 300" role="img" aria-labelledby="title desc"><title id="title">Ultraviolet Rolling Signal horizontal lockup</title><desc id="desc">PulsePlay Ultraviolet Rolling Signal horizontal lockup</desc><style>
-  .display{font-family:'DIN Alternate','Helvetica Neue',sans-serif;font-weight:700;letter-spacing:-.018em}
+<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="623" height="175" viewBox="56 57 623 175" role="img" aria-labelledby="title desc"><title id="title">Ultraviolet Rolling Signal horizontal lockup</title><desc id="desc">PulsePlay Ultraviolet Rolling Signal horizontal lockup</desc><style>
+  @import url("https://fonts.googleapis.com/css2?family=Oswald:wght@700&amp;display=swap");
+  .display{font-family:'Oswald','DIN Alternate','Arial Narrow',sans-serif;font-weight:700;letter-spacing:-.005em}
   .body{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:400;letter-spacing:0}
   .medium{font-family:'Helvetica Neue',Helvetica,sans-serif;font-weight:600;letter-spacing:-.005em}
   .data{font-family:Menlo,monospace;font-weight:600;letter-spacing:.025em;font-variant-numeric:tabular-nums}
-</style><rect width="1280" height="300" fill="#080A0E"/><g transform="translate(48 50) scale(2)"><path d="M12 18h42v15H28v34h26v15H12z" fill="#F4F5F7"/><path d="M46 18h42v64H46V67h26V33H46z" fill="#905BFF"/><rect x="42" y="43" width="16" height="14" fill="#F4F5F7"/></g><text x="284" y="188" class="display" font-size="96" fill="#F4F5F7">PulsePlay</text></svg>
+</style><g transform="translate(48 50) scale(2)"><path d="M12 18h42v15H28v34h26v15H12z" fill="#F4F5F7"/><path d="M46 18h42v64H46V67h26V33H46z" fill="#905BFF"/><rect x="42" y="43" width="16" height="14" fill="#F4F5F7"/></g><text x="284" y="188" class="display" font-size="96" fill="#F4F5F7">PulsePlay</text></svg>

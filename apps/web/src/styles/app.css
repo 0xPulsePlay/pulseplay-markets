@@ -33,7 +33,7 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
   background: var(--pp-color-background); /* flat, no glass/blur (GUIDE §5) */
   border-bottom: 1px solid var(--pp-color-border);
 }
-.topbar .logo { height: 22px; display: block; }
+.topbar .logo { height: 26px; display: block; }
 .topbar nav { display: flex; gap: var(--pp-space-1); margin-left: var(--pp-space-2); }
 .navlink {
   padding: 6px var(--pp-space-3); border-radius: var(--pp-radius-control);
@@ -256,7 +256,7 @@ a { color: var(--pp-color-brand-bright); text-decoration: none; }
 /* ============ mobile-first (≤ 560px, incl. 390px iOS width) ============ */
 @media (max-width: 560px) {
   .topbar { flex-wrap: wrap; gap: var(--pp-space-2) var(--pp-space-3); padding: 10px var(--pp-space-4); }
-  .topbar .logo { height: 18px; }
+  .topbar .logo { height: 21px; }
   .topbar nav { margin-left: 0; }
   .topbar .spacer { flex-basis: 100%; height: 0; } /* wrap the reality badges onto their own row */
   .badge { padding: 3px 7px; }
